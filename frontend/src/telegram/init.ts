@@ -67,8 +67,18 @@ declare global {
         openTelegramLink: (url: string) => void
         openLink: (url: string) => void
         close: () => void
+        onEvent: (eventType: string, callback: (data: any) => void) => void
+        offEvent: (eventType: string, callback: (data: any) => void) => void
       }
     }
+  }
+}
+
+function updateViewportHeight(webApp: any) {
+  if (!webApp) return
+  const stableHeight = webApp.viewportStableHeight
+  if (stableHeight > 0) {
+    document.documentElement.style.setProperty('--app-height', `${stableHeight}px`)
   }
 }
 
@@ -97,7 +107,20 @@ try {
     if (theme.button_text_color) root.style.setProperty('--tg-button-text-color', theme.button_text_color)
     if (theme.secondary_bg_color) root.style.setProperty('--tg-secondary-bg-color', theme.secondary_bg_color)
 
-    console.log('[Telegram] WebApp initialized:', webApp.initDataUnsafe?.user?.id)
+    // Set initial viewport height from Telegram SDK
+    // Telegram sets --tg-viewport-stable-height CSS var but we use our own
+    // for consistent fallback behavior outside Telegram
+    updateViewportHeight(webApp)
+
+    // Subscribe to viewport changes — re-set height when stable
+    webApp.onEvent('viewportChanged', ({ isStateStable }) => {
+      if (isStateStable) {
+        updateViewportHeight(webApp)
+      }
+    })
+
+    console.log('[Telegram] WebApp initialized:', webApp.initDataUnsafe?.user?.id,
+      'height:', webApp.viewportStableHeight)
   } else {
     console.warn('[Telegram] WebApp SDK not found — running outside Telegram')
   }

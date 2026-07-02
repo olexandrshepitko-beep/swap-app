@@ -18,17 +18,49 @@ export default function CardSwiper({ items, currentIndex, likedCount, onSwipeLef
   const [isDragging, setIsDragging] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [leaveDir, setLeaveDir] = useState<'left' | 'right' | null>(null)
-
   const startX = useRef(0)
   const startY = useRef(0)
+  const hasMoved = useRef(false)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
 
   const currentItem = items[currentIndex]
+
+  const goNext = () => {
+    setLeaving(false)
+    setLeaveDir(null)
+    setSwipeX(0)
+    setSwipeY(0)
+    const next = currentIndex + 1
+    if (next < items.length) {
+      onIndexChange(next)
+    }
+  }
+
+  const goPrev = () => {
+    const prev = currentIndex - 1
+    if (prev >= 0) {
+      onIndexChange(prev)
+    }
+  }
+
+  // Tap to skip — как Instagram Stories
+  const handleTap = useCallback((clientX: number) => {
+    if (!currentItem) return
+    const screenThird = window.innerWidth / 2
+    if (clientX >= screenThird) {
+      // Правая половина → скип (свайп влево)
+      goNext()
+    } else {
+      // Левая половина → предыдущий
+      goPrev()
+    }
+  }, [currentItem, currentIndex, items.length])
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!currentItem) return
     startX.current = e.touches[0].clientX
     startY.current = e.touches[0].clientY
+    hasMoved.current = false
     setIsDragging(true)
     setLeaveDir(null)
   }, [currentItem])
@@ -37,6 +69,11 @@ export default function CardSwiper({ items, currentIndex, likedCount, onSwipeLef
     if (!isDragging || !currentItem) return
     const dx = e.touches[0].clientX - startX.current
     const dy = e.touches[0].clientY - startY.current
+
+    // Если движение > 15px — это drag, не tap
+    if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
+      hasMoved.current = true
+    }
 
     // Resist vertical scroll once horizontal swipe is detected
     if (Math.abs(dx) > 10) {
@@ -52,36 +89,41 @@ export default function CardSwiper({ items, currentIndex, likedCount, onSwipeLef
     setIsDragging(false)
     const threshold = 80
 
-    if (swipeX > threshold) {
-      setLeaveDir('right')
-      setLeaving(true)
-      setTimeout(() => {
-        onSwipeRight(currentItem)
-        goNext()
-      }, 250)
-    } else if (swipeX < -threshold) {
-      setLeaveDir('left')
-      setLeaving(true)
-      setTimeout(() => {
-        onSwipeLeft(currentItem)
-        goNext()
-      }, 250)
+    // Если был drag (движение > порога) — обрабатываем как свайп
+    if (hasMoved.current) {
+      if (swipeX > threshold) {
+        setLeaveDir('right')
+        setLeaving(true)
+        setTimeout(() => {
+          onSwipeRight(currentItem)
+          goNext()
+        }, 250)
+      } else if (swipeX < -threshold) {
+        setLeaveDir('left')
+        setLeaving(true)
+        setTimeout(() => {
+          onSwipeLeft(currentItem)
+          goNext()
+        }, 250)
+      } else {
+        setSwipeX(0)
+        setSwipeY(0)
+        // Если движение было меньше порога, но больше 15px — всё равно скролл/отмена
+        if (Math.abs(swipeX) > 15 || Math.abs(swipeY) > 15) {
+          setSwipeX(0)
+          setSwipeY(0)
+        } else {
+          // Очень маленькое движение — считаем тапом
+          handleTap(startX.current)
+        }
+      }
     } else {
+      // Не было движения — чистый тап
       setSwipeX(0)
       setSwipeY(0)
+      handleTap(startX.current)
     }
-  }, [swipeX, currentItem])
-
-  const goNext = () => {
-    setLeaving(false)
-    setLeaveDir(null)
-    setSwipeX(0)
-    setSwipeY(0)
-    const next = currentIndex + 1
-    if (next < items.length) {
-      onIndexChange(next)
-    }
-  }
+  }, [swipeX, currentItem, currentIndex, items.length, onSwipeLeft, onSwipeRight])
 
   const getCardStyle = (): React.CSSProperties => {
     if (leaving) {
