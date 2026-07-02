@@ -19,6 +19,10 @@ style.textContent = `
     padding: 0;
     width: 100%;
     height: 100%;
+    min-height: 100vh;
+    /* --app-height is set by Telegram WebApp SDK init.ts,
+       fallback 100vh for outside-Telegram */
+    min-height: var(--app-height, 100vh);
     overflow: hidden;
     background: #0d0d1a;
     color: #e8e8f0;

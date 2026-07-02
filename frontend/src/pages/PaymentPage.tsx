@@ -179,7 +179,7 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  minHeight: '100vh',
+  minHeight: 'var(--app-height, 100vh)',
   overflowY: 'auto',
   background: '#0d0d1a',
 }

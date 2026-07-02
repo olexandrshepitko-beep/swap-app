@@ -367,7 +367,7 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflowY: 'auto',
-  minHeight: '100vh',
+  minHeight: 'var(--app-height, 100vh)',
   background: '#0d0d1a',
 }
 

@@ -48,12 +48,13 @@ const App: React.FC = () => {
 const appStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
-  minHeight: '100vh',
+  minHeight: 'var(--app-height, 100vh)',
   display: 'flex',
   flexDirection: 'column',
   background: '#0d0d1a',
   color: '#e8e8f0',
   overflow: 'hidden',
+  position: 'relative',
 }
 
 export default App

@@ -177,7 +177,7 @@ const containerStyle: React.CSSProperties = {
   flex: 1,
   padding: '20px 16px',
   paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)',
-  minHeight: '100vh',
+  minHeight: 'var(--app-height, 100vh)',
   overflowY: 'auto',
   background: '#0d0d1a',
 }

@@ -145,9 +145,10 @@ const containerStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   padding: '16px 20px 100px',
-  minHeight: '100dvh',
+  height: 'var(--app-height, 100vh)',
   position: 'relative',
-  overflow: 'hidden',
+  overflowY: 'auto',
+  overflowX: 'hidden',
   background: '#0d0d1a',
 }
 
