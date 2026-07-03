@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import get_engine, get_base, dispose_engine
-from app.api import auth, items, swipe, match, payment, chat, subscription, telegram_webhook
+from app.api import auth, items, swipe, match, payment, chat, subscription, telegram_webhook, media
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ app.include_router(payment.router)
 app.include_router(chat.router)
 app.include_router(subscription.router)
 app.include_router(telegram_webhook.router)
+app.include_router(media.router)
 
 
 @app.get("/health")

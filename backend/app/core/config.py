@@ -22,7 +22,20 @@ class Settings(BaseSettings):
     TELEGRAM_PROVIDER_TOKEN: str = ""
     CURRENCY: str = "XTR"  # XTR = Telegram Stars; либо "USD"/"RUB" с провайдером
 
+    # ID приватного канала/чата, куда бот шлёт sendVideo, чтобы получить
+    # постоянный file_id (Telegram как бесплатный видео-CDN).
+    # Бот должен быть добавлен туда админом. Получить chat_id: добавить
+    # бота в канал, переслать любое сообщение из канала боту @getidsbot.
+    STORAGE_CHAT_ID: int
+
     TON_API_KEY: str = ""
+    # Публичный TON-адрес кошелька, куда пользователи шлют оплату напрямую
+    TON_WALLET_ADDRESS: str = ""
+    # https://toncenter.com/api/v2 (mainnet) или testnet.toncenter.com/api/v2
+    TON_API_BASE: str = "https://toncenter.com/api/v2"
+    TON_MATCH_PRICE: float = 0.15   # цена разблокировки чата в TON
+    TON_PRO_PRICE: float = 3.0      # цена PRO-подписки в TON
+
     SECRET_KEY: str  # без дефолта — падаем на старте, если не задан в env
 
     PRO_PRICE: float = 10.0

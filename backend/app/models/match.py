@@ -26,6 +26,7 @@ class Match(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # pending, active, expired
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -33,3 +34,5 @@ class Match(Base):
     # Relationships
     payment = relationship("Payment", back_populates="match", uselist=False, lazy="selectin")
     chat = relationship("Chat", back_populates="match", uselist=False, lazy="selectin")
+    item_a = relationship("Item", foreign_keys=[item_a_id], lazy="selectin")
+    item_b = relationship("Item", foreign_keys=[item_b_id], lazy="selectin")

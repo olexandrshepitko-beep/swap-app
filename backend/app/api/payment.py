@@ -89,6 +89,90 @@ async def init_payment(
     )
 
 
+class TonPaymentInfoResponse(BaseModel):
+    address: str
+    amount_nanoton: int
+    amount_ton: float
+    comment: str
+
+
+class TonVerifyResponse(BaseModel):
+    verified: bool
+    message: str
+
+
+@router.get("/ton/info/{match_id}", response_model=TonPaymentInfoResponse)
+async def get_ton_payment_info(
+    match_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Данные для отправки TON-транзакции с фронта через TonConnect."""
+    from app.services.payment_service import PaymentService
+
+    payment_service = PaymentService(db)
+    try:
+        payment = await payment_service.init_payment(match_id=match_id, user_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if payment.status == "paid":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already paid")
+
+    if not settings.TON_WALLET_ADDRESS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="TON payments are not configured",
+        )
+
+    from app.services.ton_service import to_nanoton
+
+    return TonPaymentInfoResponse(
+        address=settings.TON_WALLET_ADDRESS,
+        amount_nanoton=to_nanoton(settings.TON_MATCH_PRICE),
+        amount_ton=settings.TON_MATCH_PRICE,
+        comment=f"match:{match_id}:{current_user.id}",
+    )
+
+
+@router.post("/ton/verify/{match_id}", response_model=TonVerifyResponse)
+async def verify_ton_payment(
+    match_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """
+    Вызывается фронтом после отправки TON-транзакции. Сверяет с блокчейном
+    и, если найдена подходящая транзакция, сразу помечает оплату как paid
+    (той же идемпотентной логикой, что и Telegram webhook — settle()).
+    """
+    from app.services.payment_service import PaymentService
+    from app.services.ton_service import find_matching_transaction, to_nanoton, TonVerificationError
+
+    expected_comment = f"match:{match_id}:{current_user.id}"
+    min_amount = to_nanoton(settings.TON_MATCH_PRICE)
+
+    try:
+        tx_hash = await find_matching_transaction(expected_comment, min_amount)
+    except TonVerificationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+    if not tx_hash:
+        return TonVerifyResponse(
+            verified=False,
+            message="Транзакция пока не найдена в блокчейне — подождите и попробуйте снова",
+        )
+
+    payment_service = PaymentService(db)
+    payment = await payment_service.settle(
+        match_id=match_id, user_id=current_user.id, provider_payment_id=tx_hash
+    )
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    return TonVerifyResponse(verified=True, message="Оплата подтверждена")
+
+
 @router.get("/status/{match_id}", response_model=PaymentStatusResponse)
 async def get_payment_status(
     match_id: int,

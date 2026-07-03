@@ -1,9 +1,15 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
+import { TonConnectUIProvider } from '@tonconnect/ui-react'
 import App from './App'
 import { TelegramProvider } from './telegram/TelegramProvider'
 import './telegram/init'
+
+// Манифест обязателен для TonConnect — должен быть публично доступен по HTTPS.
+// Лежит в frontend/public/tonconnect-manifest.json, деплоится на gh-pages
+// вместе со сборкой (Vite копирует public/* в корень билда как есть).
+const TON_MANIFEST_URL = 'https://olexandrshepitko-beep.github.io/swap-app/tonconnect-manifest.json'
 
 // Global styles
 const style = document.createElement('style')
@@ -19,10 +25,6 @@ style.textContent = `
     padding: 0;
     width: 100%;
     height: 100%;
-    min-height: 100vh;
-    /* --app-height is set by Telegram WebApp SDK init.ts,
-       fallback 100vh for outside-Telegram */
-    min-height: var(--app-height, 100vh);
     overflow: hidden;
     background: #0d0d1a;
     color: #e8e8f0;
@@ -121,10 +123,12 @@ document.head.appendChild(style)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <HashRouter>
-      <TelegramProvider>
-        <App />
-      </TelegramProvider>
-    </HashRouter>
+    <TonConnectUIProvider manifestUrl={TON_MANIFEST_URL}>
+      <HashRouter>
+        <TelegramProvider>
+          <App />
+        </TelegramProvider>
+      </HashRouter>
+    </TonConnectUIProvider>
   </React.StrictMode>
 )

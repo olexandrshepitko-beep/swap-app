@@ -87,3 +87,42 @@ async def set_webhook(url: str) -> None:
             "allowed_updates": ["pre_checkout_query", "message"],
         },
     )
+
+
+async def upload_video(file_bytes: bytes, filename: str) -> str:
+    """
+    Загружает видео в STORAGE_CHAT_ID через sendVideo и возвращает file_id.
+    Это способ бесплатно использовать Telegram как видео-хранилище —
+    file_id постоянный, сам файл лежит на серверах Telegram.
+
+    Ограничение Bot API: до 50 МБ на файл через этот метод.
+    """
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{BOT_API_BASE}/sendVideo",
+            data={"chat_id": settings.STORAGE_CHAT_ID, "supports_streaming": "true"},
+            files={"video": (filename, file_bytes, "video/mp4")},
+        )
+    data = resp.json()
+    if not data.get("ok"):
+        raise TelegramBotAPIError(f"sendVideo failed: {data.get('description')}")
+
+    video = data["result"].get("video")
+    if not video:
+        raise TelegramBotAPIError("sendVideo response has no video object")
+    return video["file_id"]
+
+
+async def get_file_path(file_id: str) -> str:
+    """Резолвит file_id в актуальный file_path (годен ~1 час)."""
+    result = await _call("getFile", {"file_id": file_id})
+    return result["file_path"]
+
+
+def file_download_url(file_path: str) -> str:
+    """
+    Внимание: этот URL содержит BOT_TOKEN в открытом виде.
+    НИКОГДА не отдавать его напрямую клиенту — только использовать
+    server-side для проксирования байтов (см. api/media.py).
+    """
+    return f"https://api.telegram.org/file/bot{settings.BOT_TOKEN}/{file_path}"
