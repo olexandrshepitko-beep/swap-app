@@ -12,7 +12,6 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
-    "@rollup/rollup-android-arm-eabi": "^4.62.2",
     "@telegram-apps/sdk": "^1.1.2",
     "@tonconnect/ui-react": "^2.0.7",
     "axios": "^1.7.7",
@@ -33,5 +32,8 @@
     "typescript": "^5.5.4",
     "vite": "^5.4.3",
     "vitest": "^2.0.5"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-android-arm-eabi": "^4.62.2"
   }
 }
