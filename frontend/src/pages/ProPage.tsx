@@ -1,64 +1,129 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
-// TonConnect temporarily disabled
-// import { TonConnectButton, useTonWallet } from '@tonconnect/ui-react'
+import { barterApi } from '../services/api'
+import { sendTonPayment } from '../services/tonPayment'
+import { TonConnectButton, useTonWallet, useTonConnectUI } from '@tonconnect/ui-react'
 import { CrownIcon, StarIcon, WalletIcon, ChatIcon, BoltIcon, SparklesIcon, CheckIcon, LockIcon } from '../components/Icons'
 
-const PRO_FEATURES_DATA = [
+type PaymentMethod = 'telegram' | 'ton'
+
+const PRO_FEATURES = [
   {
     icon: <WalletIcon size={22} color="#FFD700" />,
-    titleKey: 'pro.feat1Title' as const,
-    descKey: 'pro.feat1Desc' as const,
+    title: 'Скидка на открытие контакта',
+    description: 'Платите $0.25 вместо $0.5 за каждый открытый контакт',
   },
   {
     icon: <BoltIcon size={22} color="#FFD700" />,
-    titleKey: 'pro.feat2Title' as const,
-    descKey: 'pro.feat2Desc' as const,
+    title: 'Приоритет в ленте',
+    description: 'Ваши вещи показываются в первую очередь другим пользователям',
   },
   {
     icon: <SparklesIcon size={22} color="#FFD700" />,
-    titleKey: 'pro.feat3Title' as const,
-    descKey: 'pro.feat3Desc' as const,
+    title: 'Расширенная статистика',
+    description: 'Просмотры, лайки, конверсия по каждой вашей вещи',
   },
   {
     icon: <ChatIcon size={22} color="#FFD700" />,
-    titleKey: 'pro.feat4Title' as const,
-    descKey: 'pro.feat4Desc' as const,
+    title: 'Обсуждать доплату',
+    description: 'Возможность обсуждать денежную доплату к обмену',
   },
   {
     icon: <StarIcon size={22} color="#FFD700" />,
-    titleKey: 'pro.feat5Title' as const,
-    descKey: 'pro.feat5Desc' as const,
+    title: 'Безлимитные объявления',
+    description: 'Публикуйте сколько угодно вещей без ограничений',
   },
 ]
 
 const ProPage: React.FC = () => {
   const navigate = useNavigate()
-  const { showBackButton, hideBackButton, showMainButton, hideMainButton, hapticFeedback } = useTelegram()
-  const { t } = useLanguage()
+  const tonWallet = useTonWallet()
+  const [tonConnectUI] = useTonConnectUI()
+  const { showBackButton, hideBackButton, showMainButton, hideMainButton, hapticFeedback, openInvoice } = useTelegram()
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('telegram')
   const [isSubscribing, setIsSubscribing] = useState(false)
   const [isPro, setIsPro] = useState(false)
+  const [tonError, setTonError] = useState<string | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     showBackButton(() => navigate(-1))
+    barterApi.getProStatus().then(s => setIsPro(s.active)).catch(() => {})
     return () => {
       hideBackButton()
       hideMainButton()
+      if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [showBackButton, hideBackButton, navigate, hideMainButton])
 
-  const handleSubscribe = useCallback(() => {
+  const handleSubscribe = useCallback(async () => {
     setIsSubscribing(true)
     hapticFeedback('medium')
 
-    setTimeout(() => {
-      setIsPro(true)
+    try {
+      const { invoice_link } = await barterApi.subscribePro()
+
+      openInvoice(invoice_link, (status) => {
+        if (status !== 'paid') {
+          setIsSubscribing(false)
+          if (status === 'failed' || status === 'cancelled') hapticFeedback('error')
+          return
+        }
+        // Подтверждение приходит асинхронно через /telegram/webhook — поллим статус
+        pollRef.current = setInterval(async () => {
+          const s = await barterApi.getProStatus()
+          if (s.active) {
+            setIsPro(true)
+            setIsSubscribing(false)
+            hapticFeedback('success')
+            if (pollRef.current) clearInterval(pollRef.current)
+          }
+        }, 2500)
+      })
+    } catch (e) {
+      console.error('[Pro] subscribe failed:', e)
       setIsSubscribing(false)
-      hapticFeedback('success')
-    }, 2000)
-  }, [hapticFeedback])
+      hapticFeedback('error')
+    }
+  }, [hapticFeedback, openInvoice])
+
+  const handleTonSubscribe = useCallback(async () => {
+    if (!tonWallet) return
+    setIsSubscribing(true)
+    setTonError(null)
+    hapticFeedback('medium')
+
+    try {
+      const info = await barterApi.getSubscriptionTonInfo()
+      await sendTonPayment(tonConnectUI, info.address, info.amount_nanoton, info.comment)
+
+      let attempts = 0
+      const interval = setInterval(async () => {
+        attempts += 1
+        try {
+          const res = await barterApi.verifySubscriptionTonPayment(info.subscription_id)
+          if (res.verified) {
+            setIsPro(true)
+            setIsSubscribing(false)
+            hapticFeedback('success')
+            clearInterval(interval)
+          }
+        } catch { /* транзакция ещё не найдена */ }
+
+        if (attempts > 20) {
+          setIsSubscribing(false)
+          setTonError('Транзакция не подтвердилась. Попробуйте снова через пару минут.')
+          clearInterval(interval)
+        }
+      }, 6000)
+    } catch (e) {
+      console.error('[Pro] TON subscribe failed:', e)
+      setIsSubscribing(false)
+      setTonError('Не удалось отправить транзакцию.')
+      hapticFeedback('error')
+    }
+  }, [tonWallet, tonConnectUI, hapticFeedback])
 
   return (
     <div style={containerStyle}>
@@ -68,9 +133,9 @@ const ProPage: React.FC = () => {
           <div style={proBadgeContainerStyle}>
             <CrownIcon size={44} color="#FFD700" />
           </div>
-          <h1 style={titleStyle}>{t('pro.title')}</h1>
+          <h1 style={titleStyle}>Подписка PRO</h1>
           <p style={subtitleStyle}>
-            {t('pro.subtitle')}
+            Получите максимум от бартер-маркетплейса
           </p>
         </div>
 
@@ -78,24 +143,24 @@ const ProPage: React.FC = () => {
         <div style={priceCardStyle}>
           <div style={priceRowStyle}>
             <span style={priceAmountStyle}>$10</span>
-            <span style={pricePeriodStyle}>{t('pro.perMonth')}</span>
+            <span style={pricePeriodStyle}>/месяц</span>
           </div>
           <p style={priceHintStyle}>
-            {t('pro.cancelAnytime')}
+            Отмените в любой момент
           </p>
         </div>
 
         {/* Features */}
         <div style={featuresStyle}>
-          <h2 style={featuresTitleStyle}>{t('pro.features')}:</h2>
-          {PRO_FEATURES_DATA.map((feature, index) => (
+          <h2 style={featuresTitleStyle}>Преимущества:</h2>
+          {PRO_FEATURES.map((feature, index) => (
             <div key={index} style={featureCardStyle}>
               <div style={featureIconContainerStyle}>
                 {feature.icon}
               </div>
               <div style={featureTextStyle}>
-                <p style={featureTitleStyle}>{t(feature.titleKey)}</p>
-                <p style={featureDescStyle}>{t(feature.descKey)}</p>
+                <p style={featureTitleStyle}>{feature.title}</p>
+                <p style={featureDescStyle}>{feature.description}</p>
               </div>
             </div>
           ))}
@@ -106,23 +171,72 @@ const ProPage: React.FC = () => {
           {isPro ? (
             <div style={successStyle}>
               <CheckIcon size={32} color="#2ed573" />
-              <p style={successTextStyle}>{t('pro.success')}</p>
+              <p style={successTextStyle}>Вы PRO! Спасибо за поддержку!</p>
             </div>
           ) : (
-            <button
-              style={subscribeButtonStyle}
-              onClick={handleSubscribe}
-              disabled={isSubscribing}
-            >
-              {isSubscribing ? (
-                t('pro.processing')
+            <>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10, width: '100%' }}>
+                <button
+                  onClick={() => setPaymentMethod('telegram')}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 10,
+                    border: paymentMethod === 'telegram' ? '1px solid rgba(102,126,234,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                    background: paymentMethod === 'telegram' ? 'rgba(102,126,234,0.15)' : 'transparent',
+                    color: paymentMethod === 'telegram' ? '#a29bfe' : 'rgba(255,255,255,0.4)',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Telegram
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('ton')}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 10,
+                    border: paymentMethod === 'ton' ? '1px solid rgba(0,152,234,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                    background: paymentMethod === 'ton' ? 'rgba(0,152,234,0.15)' : 'transparent',
+                    color: paymentMethod === 'ton' ? '#0098EA' : 'rgba(255,255,255,0.4)',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  💎 TON
+                </button>
+              </div>
+
+              {paymentMethod === 'telegram' ? (
+                <button
+                  style={subscribeButtonStyle}
+                  onClick={handleSubscribe}
+                  disabled={isSubscribing}
+                >
+                  {isSubscribing ? (
+                    'Оформление...'
+                  ) : (
+                    <>
+                      <CrownIcon size={18} color="#1a1a2e" />
+                      <span style={{ marginLeft: 8 }}>Стать PRO за $10/мес</span>
+                    </>
+                  )}
+                </button>
+              ) : !tonWallet ? (
+                <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+                  <TonConnectButton />
+                </div>
               ) : (
-                <>
-                  <CrownIcon size={18} color="#1a1a2e" />
-                  <span style={{ marginLeft: 8 }}>{t('pro.subscribePrice')}</span>
-                </>
+                <button
+                  style={{ ...subscribeButtonStyle, background: 'linear-gradient(135deg, #0098EA 0%, #12B5FF 100%)', color: '#fff' }}
+                  onClick={handleTonSubscribe}
+                  disabled={isSubscribing}
+                >
+                  {isSubscribing ? 'Ожидаем подтверждение...' : (
+                    <>💎 <span style={{ marginLeft: 8 }}>Оплатить 3 TON/мес</span></>
+                  )}
+                </button>
               )}
-            </button>
+
+              {tonError && (
+                <p style={{ fontSize: 12, color: '#ff4757', textAlign: 'center', margin: '8px 0 0' }}>{tonError}</p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -137,7 +251,7 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  minHeight: 'var(--app-height, 100vh)',
+  minHeight: '100vh',
   overflowY: 'auto',
   background: '#0d0d1a',
 }

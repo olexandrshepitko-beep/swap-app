@@ -1,32 +1,31 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
+import { barterApi } from '../services/api'
 import { CameraIcon, RefreshIcon, LockIcon, CheckIcon, StarIcon } from '../components/Icons'
 
 type Step = 1 | 2 | 3
 
 const CATEGORIES = [
-  { value: 'electronics', label: 'feed.electronics' as const, icon: '📱' },
-  { value: 'clothing', label: 'feed.clothing' as const, icon: '👕' },
-  { value: 'books', label: 'feed.books' as const, icon: '📚' },
-  { value: 'home', label: 'feed.home' as const, icon: '🏠' },
-  { value: 'sports', label: 'feed.sports' as const, icon: '⚽' },
-  { value: 'toys', label: 'feed.toys' as const, icon: '🎲' },
-  { value: 'other', label: 'feed.other' as const, icon: '📦' },
+  { value: 'electronics', label: 'Электроника', icon: '📱' },
+  { value: 'clothing', label: 'Одежда', icon: '👕' },
+  { value: 'books', label: 'Книги', icon: '📚' },
+  { value: 'home', label: 'Дом и сад', icon: '🏠' },
+  { value: 'sports', label: 'Спорт', icon: '⚽' },
+  { value: 'toys', label: 'Игрушки', icon: '🎲' },
+  { value: 'other', label: 'Другое', icon: '📦' },
 ]
 
 const CONDITIONS = [
-  { value: 'new', label: 'condition.new' as const, icon: '🆕' },
-  { value: 'like_new', label: 'condition.likeNew' as const, icon: '✨' },
-  { value: 'good', label: 'condition.good' as const, icon: '👍' },
-  { value: 'fair', label: 'condition.fair' as const, icon: '👌' },
+  { value: 'new', label: 'Новый', icon: '🆕' },
+  { value: 'like_new', label: 'Как новый', icon: '✨' },
+  { value: 'good', label: 'Хорошее', icon: '👍' },
+  { value: 'fair', label: 'Удовлетворительное', icon: '👌' },
 ]
 
 const CreateItemPage: React.FC = () => {
   const navigate = useNavigate()
   const { showMainButton, hideMainButton, showBackButton, hideBackButton, hapticFeedback } = useTelegram()
-  const { t } = useLanguage()
 
   const [step, setStep] = useState<Step>(1)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -58,7 +57,7 @@ const CreateItemPage: React.FC = () => {
   useEffect(() => {
     switch (step) {
       case 1:
-        showMainButton(t('create.next'), () => {
+        showMainButton('Далее', () => {
           if (videoUrl) {
             hapticFeedback('light')
             setStep(2)
@@ -66,7 +65,7 @@ const CreateItemPage: React.FC = () => {
         }, videoUrl ? undefined : '#555')
         break
       case 2:
-        showMainButton(t('create.next'), () => {
+        showMainButton('Далее', () => {
           if (title.trim()) {
             hapticFeedback('light')
             setStep(3)
@@ -74,14 +73,15 @@ const CreateItemPage: React.FC = () => {
         }, title.trim() ? undefined : '#555')
         break
       case 3:
-        showMainButton(t('create.publish'), () => {
+        showMainButton(isSubmitting ? 'Публикация...' : 'Опубликовать', () => {
+          if (isSubmitting) return
           hapticFeedback('medium')
           handleSubmit()
-        })
+        }, isSubmitting ? '#555' : undefined)
         break
     }
     return () => hideMainButton()
-  }, [step, videoUrl, title])
+  }, [step, videoUrl, title, isSubmitting])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -135,7 +135,7 @@ const CreateItemPage: React.FC = () => {
     } catch (err) {
       console.error('Camera error:', err)
       setIsRecording(false)
-      alert(t('common.cameraError'))
+      alert('Не удалось получить доступ к камере. Пожалуйста, разрешите доступ.')
     }
   }, [hapticFeedback])
 
@@ -150,7 +150,7 @@ const CreateItemPage: React.FC = () => {
     if (!file) return
 
     if (file.size > 50_000_000) {
-      alert(t('common.videoTooBig'))
+      alert('Видео слишком большое. Пожалуйста, загрузите видео до 50MB.')
       return
     }
 
@@ -167,10 +167,31 @@ const CreateItemPage: React.FC = () => {
     fileInputRef.current?.click()
   }, [])
 
-  const handleSubmit = useCallback(() => {
-    console.log('Creating item:', { title, description, category, condition, videoBlob })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const handleSubmit = useCallback(async () => {
+    if (!videoBlob) {
+      setSubmitError('Видео обязательно')
+      return
+    }
+    setIsSubmitting(true)
+    setSubmitError(null)
     hapticFeedback('heavy')
-    navigate('/feed')
+
+    try {
+      await barterApi.createItem({ title, description, category, condition, videoBlob })
+      navigate('/feed')
+    } catch (e: any) {
+      console.error('[CreateItem] Failed:', e)
+      const detail = e?.response?.data?.detail
+      setSubmitError(
+        typeof detail === 'string' ? detail : 'Не удалось опубликовать. Попробуйте ещё раз.'
+      )
+      hapticFeedback('error')
+    } finally {
+      setIsSubmitting(false)
+    }
   }, [title, description, category, condition, videoBlob, hapticFeedback, navigate])
 
   const retryVideo = useCallback(() => {
@@ -186,13 +207,13 @@ const CreateItemPage: React.FC = () => {
         <div style={progressBarStyle}>
           <div style={{ ...progressFillStyle, width: `${(step / 3) * 100}%` }} />
         </div>
-        <span style={progressTextStyle}>{t('create.step')} {step} / 3</span>
+        <span style={progressTextStyle}>{step} / 3</span>
       </div>
 
       {step === 1 && (
         <div style={stepContentStyle}>
-          <h2 style={headingStyle}>{t('create.uploadVideo')}</h2>
-          <p style={hintStyle}>{t('create.hint')}</p>
+          <h2 style={headingStyle}>Загрузите видео вещи</h2>
+          <p style={hintStyle}>5–15 секунд, покажите вещь со всех сторон</p>
 
           <div style={videoContainerStyle}>
             {videoUrl ? (
@@ -209,7 +230,7 @@ const CreateItemPage: React.FC = () => {
                 />
                 <button style={retryButtonStyle} onClick={retryVideo}>
                   <RefreshIcon size={14} color="#fff" />
-                  <span style={{ marginLeft: 6 }}>{t('create.recordAgain')}</span>
+                  <span style={{ marginLeft: 6 }}>Записать заново</span>
                 </button>
               </>
             ) : (
@@ -218,7 +239,7 @@ const CreateItemPage: React.FC = () => {
                   <>
                     <div style={recordingIndicatorStyle}>
                       <span style={recordingDotStyle} />
-                      Запис...
+                      Запись...
                     </div>
                     <video
                       ref={videoRef}
@@ -228,7 +249,7 @@ const CreateItemPage: React.FC = () => {
                       muted
                     />
                     <button style={stopButtonStyle} onClick={stopRecording}>
-                      ⏹ {t('create.stop')}
+                      ⏹ Остановить
                     </button>
                   </>
                 ) : (
@@ -236,15 +257,15 @@ const CreateItemPage: React.FC = () => {
                     <div style={cameraIconContainerStyle}>
                       <CameraIcon size={48} color="#667eea" />
                     </div>
-                    <p style={uploadTextStyle}>{t('create.recordVideo')}</p>
-                    <p style={uploadHintStyle}>{t('create.fromGallery')}</p>
+                    <p style={uploadTextStyle}>Нажмите, чтобы записать видео</p>
+                    <p style={uploadHintStyle}>или выберите из галереи</p>
                     <div style={buttonRowStyle}>
                       <button style={recordButtonStyle} onClick={startRecording}>
                         <CameraIcon size={16} color="#fff" />
-                        <span style={{ marginLeft: 6 }}>{t('create.record')}</span>
+                        <span style={{ marginLeft: 6 }}>Записать</span>
                       </button>
                       <button style={uploadButtonStyle} onClick={handleGalleryClick}>
-                        📁 {t('create.upload')}
+                        📁 Загрузить
                       </button>
                       <input
                         ref={fileInputRef}
@@ -264,13 +285,13 @@ const CreateItemPage: React.FC = () => {
 
       {step === 2 && (
         <div style={stepContentStyle}>
-          <h2 style={headingStyle}>{t('create.describeTitle')}</h2>
+          <h2 style={headingStyle}>Опишите вещь</h2>
 
           <div style={fieldStyle}>
-            <label style={labelStyle}>{t('create.name')} *</label>
+            <label style={labelStyle}>Название *</label>
             <input
               style={inputStyle}
-              placeholder={t('create.namePlaceholder')}
+              placeholder="Например: iPhone 14 Pro"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={100}
@@ -278,10 +299,10 @@ const CreateItemPage: React.FC = () => {
           </div>
 
           <div style={fieldStyle}>
-            <label style={labelStyle}>{t('create.description')}</label>
+            <label style={labelStyle}>Описание</label>
             <textarea
               style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder={t('create.descriptionPlaceholder')}
+              placeholder="Состояние, комплектация, дефекты..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={500}
@@ -289,7 +310,7 @@ const CreateItemPage: React.FC = () => {
           </div>
 
           <div style={fieldStyle}>
-            <label style={labelStyle}>{t('create.category')}</label>
+            <label style={labelStyle}>Категория</label>
             <div style={gridStyle}>
               {CATEGORIES.map((cat) => (
                 <button
@@ -300,14 +321,14 @@ const CreateItemPage: React.FC = () => {
                   }}
                   onClick={() => setCategory(cat.value)}
                 >
-                  {cat.icon} {t(cat.label)}
+                  {cat.icon} {cat.label}
                 </button>
               ))}
             </div>
           </div>
 
           <div style={fieldStyle}>
-            <label style={labelStyle}>{t('create.condition')}</label>
+            <label style={labelStyle}>Состояние</label>
             <div style={gridStyle}>
               {CONDITIONS.map((cond) => (
                 <button
@@ -318,7 +339,7 @@ const CreateItemPage: React.FC = () => {
                   }}
                   onClick={() => setCondition(cond.value)}
                 >
-                  {cond.icon} {t(cond.label)}
+                  {cond.icon} {cond.label}
                 </button>
               ))}
             </div>
@@ -331,28 +352,39 @@ const CreateItemPage: React.FC = () => {
           <div style={privacyIconContainerStyle}>
             <LockIcon size={40} color="#667eea" />
           </div>
-          <h2 style={headingStyle}>{t('create.almostDone')}</h2>
+          <h2 style={headingStyle}>Почти готово!</h2>
+
+          {submitError && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 12, marginBottom: 4,
+              background: 'rgba(255,71,87,0.1)', border: '1px solid rgba(255,71,87,0.25)',
+              color: '#ff4757', fontSize: 13, textAlign: 'center',
+            }}>
+              {submitError}
+            </div>
+          )}
 
           <div style={privacyCardStyle}>
-            <h3 style={privacyTitleStyle}>{t('create.accHidden')}</h3>
+            <h3 style={privacyTitleStyle}>Ваш аккаунт скрыт</h3>
             <p style={privacyTextStyle}>
-              {t('create.accHiddenDesc')}
+              Другие пользователи видят только вашу вещь. Ваше имя, фото и контакты
+              остаются скрытыми до взаимного интереса.
             </p>
           </div>
 
           <div style={summaryCardStyle}>
-            <p style={summaryLabelStyle}>{t('create.summary')}</p>
+            <p style={summaryLabelStyle}>Краткая сводка:</p>
             <p style={summaryItemStyle}>
               <strong>{title}</strong>
             </p>
             <p style={summaryItemStyle}>
-              {CATEGORIES.find((c) => c.value === category)?.icon} {t(CATEGORIES.find((c) => c.value === category)?.label || '')} ·{' '}
-              {CONDITIONS.find((c) => c.value === condition)?.icon} {t(CONDITIONS.find((c) => c.value === condition)?.label || '')}
+              {CATEGORIES.find((c) => c.value === category)?.icon} {CATEGORIES.find((c) => c.value === category)?.label} ·{' '}
+              {CONDITIONS.find((c) => c.value === condition)?.icon} {CONDITIONS.find((c) => c.value === condition)?.label}
             </p>
           </div>
 
           <p style={disclaimerStyle}>
-            {t('create.publishHint')}
+            После публикации ваша вещь появится в ленте других пользователей.
           </p>
         </div>
       )}
@@ -367,7 +399,7 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflowY: 'auto',
-  minHeight: 'var(--app-height, 100vh)',
+  minHeight: '100vh',
   background: '#0d0d1a',
 }
 

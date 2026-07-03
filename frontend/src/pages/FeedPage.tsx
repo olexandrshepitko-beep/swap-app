@@ -1,105 +1,89 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
-import { barterApi, type FeedItem } from '../services/api'
-import { DEMO_ITEMS, generateMoreItems, simulateMatch } from '../services/demoData'
+import { barterApi, type FeedItem, type MatchOpponentInfo } from '../services/api'
 import CardSwiper from '../components/CardSwiper'
-import { CrownIcon, BoltIcon, HeartIcon, SparklesIcon, ArrowLeftIcon } from '../components/Icons'
+import { BoltIcon, HeartIcon } from '../components/Icons'
 
 interface FeedPageProps {
   likedItems: FeedItem[]
   onLikedItemsChange: (items: FeedItem[]) => void
 }
 
-// Categories for filtering
-const CATEGORIES = [
-  { value: '', label: 'feed.all', icon: '🔥' },
-  { value: 'electronics', label: 'feed.electronics', icon: '📱' },
-  { value: 'clothing', label: 'feed.clothing', icon: '👕' },
-  { value: 'books', label: 'feed.books', icon: '📚' },
-  { value: 'home', label: 'feed.home', icon: '🏠' },
-  { value: 'sports', label: 'feed.sports', icon: '⚽' },
-  { value: 'toys', label: 'feed.toys', icon: '🎲' },
-  { value: 'other', label: 'feed.other', icon: '📦' },
-]
-
 const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) => {
   const navigate = useNavigate()
-  const { hapticFeedback, showBackButton, hideBackButton } = useTelegram()
-  const { t, setShowLanguageSelector } = useLanguage()
-  const [allItems, setAllItems] = useState<FeedItem[]>(DEMO_ITEMS)
+  const { hapticFeedback } = useTelegram()
+  const [items, setItems] = useState<FeedItem[]>([])
+  const [page, setPage] = useState(1)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isAnimating, setIsAnimating] = useState(false)
   const [showMatchModal, setShowMatchModal] = useState(false)
-  const [matchedOpponent, setMatchedOpponent] = useState<{ username: string; avatarUrl: string } | null>(null)
-  const [selectedCategory, setSelectedCategory] = useState('')
-  const [showCategories, setShowCategories] = useState(false)
+  const [matchedOpponent, setMatchedOpponent] = useState<MatchOpponentInfo | null>(null)
   const heartCounter = useRef(0)
   const [hearts, setHearts] = useState<{ id: number; x: number; y: number }[]>([])
+  const loadingRef = useRef(false)
 
-  // Кнопка "Назад" для повернення в головне меню
-  React.useEffect(() => {
-    showBackButton(() => navigate('/'))
-    return () => hideBackButton()
-  }, [showBackButton, hideBackButton, navigate])
+  const loadPage = useCallback(async (pageToLoad: number) => {
+    if (loadingRef.current || !hasMore) return
+    loadingRef.current = true
+    setIsLoadingMore(true)
+    try {
+      const res = await barterApi.getFeed(pageToLoad, 20)
+      setItems(prev => (pageToLoad === 1 ? res.items : [...prev, ...res.items]))
+      setHasMore(res.items.length === 20) // меньше полной страницы — дальше пусто
+      setPage(pageToLoad)
+    } catch (e) {
+      console.error('[Feed] Failed to load feed:', e)
+      if (pageToLoad === 1) setItems([])
+    } finally {
+      setIsLoadingMore(false)
+      loadingRef.current = false
+    }
+  }, [hasMore])
 
-  // Фільтрація за категорією
-  const items = useMemo(() => {
-    if (!selectedCategory) return allItems
-    return allItems.filter(item => item.category === selectedCategory)
-  }, [allItems, selectedCategory])
+  // Первая загрузка ленты
+  useEffect(() => {
+    loadPage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const loadMore = useCallback(() => {
-    const newItems = generateMoreItems(5)
-    setAllItems(prev => [...prev, ...newItems])
-  }, [])
+    if (!isLoadingMore && hasMore) loadPage(page + 1)
+  }, [loadPage, page, isLoadingMore, hasMore])
 
   const handleSwipeRight = useCallback(async (item: FeedItem) => {
     if (isAnimating) return
     setIsAnimating(true)
     hapticFeedback('medium')
 
-    // Hearts burst
     heartCounter.current += 1
     const id = heartCounter.current
     setHearts(prev => [...prev, { id, x: 30 + Math.random() * 40, y: 30 + Math.random() * 40 }])
     setTimeout(() => setHearts([]), 700)
 
-    // Додаємо до вподобаних
     if (!likedItems.find(i => i.id === item.id)) {
       onLikedItemsChange([...likedItems, item])
     }
 
-    // Спроба реального API, fallback на демо
     try {
-      const result = await barterApi.likeItem(item.id).catch(() => ({ match_id: null }))
-      if (result?.match_id) {
-        setTimeout(() => setShowMatchModal(true), 400)
-      } else {
-        const demoMatch = simulateMatch()
-        if (demoMatch) {
-          setMatchedOpponent({
-            username: demoMatch.opponentUsername || 'unknown',
-            avatarUrl: demoMatch.opponentAvatarUrl || '',
-          })
-          setTimeout(() => setShowMatchModal(true), 400)
-        }
-      }
-    } catch {
-      const demoMatch = simulateMatch()
-      if (demoMatch) {
-        setMatchedOpponent({
-          username: demoMatch.opponentUsername || 'unknown',
-          avatarUrl: demoMatch.opponentAvatarUrl || '',
-        })
+      const result = await barterApi.swipe(item.id, 'like')
+      if (result.match_id) {
+        // Подтягиваем список матчей, чтобы узнать, кто оппонент —
+        // отдельного эндпоинта "матч по id" нет, но матчей обычно немного
+        const matches = await barterApi.getMatches()
+        const fresh = matches.find(m => m.id === result.match_id)
+        setMatchedOpponent(fresh?.opponent ?? null)
         setTimeout(() => setShowMatchModal(true), 400)
       }
+    } catch (e) {
+      console.error('[Feed] swipe like failed:', e)
     }
 
     setTimeout(() => setIsAnimating(false), 300)
     if (currentIndex >= items.length - 3) loadMore()
-  }, [isAnimating, currentIndex, items.length, likedItems, onLikedItemsChange, hapticFeedback])
+  }, [isAnimating, currentIndex, items.length, likedItems, onLikedItemsChange, hapticFeedback, loadMore])
 
   const handleSwipeLeft = useCallback(async (item: FeedItem) => {
     if (isAnimating) return
@@ -107,24 +91,19 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
     hapticFeedback('light')
 
     try {
-      await barterApi.skipItem(item.id)
-    } catch { /* mock */ }
+      await barterApi.swipe(item.id, 'pass')
+    } catch (e) {
+      console.error('[Feed] swipe pass failed:', e)
+    }
 
     setTimeout(() => setIsAnimating(false), 300)
     if (currentIndex >= items.length - 2) loadMore()
-  }, [isAnimating, currentIndex, items.length, hapticFeedback])
+  }, [isAnimating, currentIndex, items.length, hapticFeedback, loadMore])
 
   const handleIndexChange = useCallback((index: number) => {
     setCurrentIndex(index)
     if (index >= items.length - 3) loadMore()
   }, [items.length, loadMore])
-
-  const handleCategorySelect = useCallback((cat: string) => {
-    setSelectedCategory(cat)
-    setCurrentIndex(0)
-    setShowCategories(false)
-    hapticFeedback('light')
-  }, [hapticFeedback])
 
   return (
     <div style={{
@@ -135,152 +114,69 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
       color: '#e8e8f0',
       position: 'relative',
     }}>
-      {/* Верхня панель з категоріями */}
+      {/* Top bar */}
       <div style={{
         display: 'flex',
-        flexDirection: 'column',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 16px',
+        paddingTop: 12,
         background: 'rgba(13,13,26,0.8)',
         backdropFilter: 'blur(12px)',
         zIndex: 10,
       }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '8px 16px',
-          paddingTop: 12,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <BoltIcon size={20} color="#667eea" />
-            <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Barter</span>
-            {selectedCategory && (
-              <span style={{ fontSize: 12, color: '#8888b0', marginLeft: 4 }}>
-                · {t(CATEGORIES.find(c => c.value === selectedCategory)?.label || selectedCategory)}
-              </span>
-            )}
-            <button
-              onClick={() => setShowLanguageSelector(true)}
-              style={{
-                marginLeft: 4, padding: '2px 6px', borderRadius: 8,
-                background: 'transparent', border: 'none',
-                color: '#5a5a7a', fontSize: 14, cursor: 'pointer',
-              }}
-            >
-              🌐
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => setShowCategories(prev => !prev)}
-              style={{
-                padding: '6px 12px', borderRadius: 10,
-                background: selectedCategory ? 'rgba(102,126,234,0.15)' : 'rgba(255,255,255,0.08)',
-                border: selectedCategory ? '1px solid rgba(102,126,234,0.3)' : '1px solid rgba(255,255,255,0.1)',
-                color: selectedCategory ? '#667eea' : '#fff',
-                fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 4,
-              }}
-            >
-              📋 {t('feed.categories')}
-            </button>
-            <button
-              onClick={() => navigate('/liked')}
-              style={{
-                padding: '6px 12px', borderRadius: 10,
-                background: likedItems.length > 0 ? 'rgba(255,107,157,0.15)' : 'rgba(255,255,255,0.08)',
-                border: likedItems.length > 0 ? '1px solid rgba(255,107,157,0.3)' : '1px solid rgba(255,255,255,0.1)',
-                color: likedItems.length > 0 ? '#ff6b9d' : '#fff',
-                fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 4,
-                position: 'relative',
-              }}
-            >
-              <HeartIcon size={12} color={likedItems.length > 0 ? '#ff6b9d' : '#fff'} />
-              {t('feed.my')}
-              {likedItems.length > 0 && (
-                <span style={{
-                  position: 'absolute', top: -6, right: -6,
-                  background: '#ff6b9d', color: '#fff',
-                  fontSize: 10, fontWeight: 700,
-                  minWidth: 18, height: 18, borderRadius: 9,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: '0 4px',
-                }}>
-                  {likedItems.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => navigate('/matches')}
-              style={{
-                padding: '6px 12px', borderRadius: 10,
-                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
-                color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              ✨ {t('feed.matches')}
-            </button>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <BoltIcon size={20} color="#667eea" />
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Barter</span>
         </div>
-
-        {/* Випадаюча панель категорій */}
-        {showCategories && (
-          <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 6,
-            padding: '8px 16px 12px',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat.value}
-                onClick={() => handleCategorySelect(cat.value)}
-                style={{
-                  padding: '6px 14px', borderRadius: 20,
-                  background: selectedCategory === cat.value
-                    ? 'linear-gradient(135deg, #667eea, #764ba2)'
-                    : 'rgba(255,255,255,0.06)',
-                  border: selectedCategory === cat.value
-                    ? 'none'
-                    : '1px solid rgba(255,255,255,0.1)',
-                  color: selectedCategory === cat.value ? '#fff' : '#b0b0c8',
-                  fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                {cat.icon} {t(cat.label)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Повідомлення якщо немає товарів у категорії */}
-      {items.length === 0 ? (
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 12,
-          padding: 24,
-        }}>
-          <span style={{ fontSize: 48 }}>📭</span>
-          <p style={{ color: '#8888b0', fontSize: 14, textAlign: 'center' }}>
-            {t('feed.emptyTitle')}
-          </p>
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={() => handleCategorySelect('')}
+            onClick={() => navigate('/liked')}
             style={{
-              padding: '10px 24px', borderRadius: 12,
-              background: 'rgba(102,126,234,0.15)',
-              border: '1px solid rgba(102,126,234,0.3)',
-              color: '#667eea', fontSize: 13, fontWeight: 600,
-              cursor: 'pointer', fontFamily: 'inherit',
+              padding: '6px 12px', borderRadius: 10,
+              background: likedItems.length > 0 ? 'rgba(255,107,157,0.15)' : 'rgba(255,255,255,0.08)',
+              border: likedItems.length > 0 ? '1px solid rgba(255,107,157,0.3)' : '1px solid rgba(255,255,255,0.1)',
+              color: likedItems.length > 0 ? '#ff6b9d' : '#fff',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 4,
+              position: 'relative',
             }}
           >
-            🔥 {t('feed.showAll')}
+            <HeartIcon size={12} color={likedItems.length > 0 ? '#ff6b9d' : '#fff'} />
+            Мои
+            {likedItems.length > 0 && (
+              <span style={{
+                position: 'absolute', top: -6, right: -6,
+                background: '#ff6b9d', color: '#fff',
+                fontSize: 10, fontWeight: 700,
+                minWidth: 18, height: 18, borderRadius: 9,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '0 4px',
+              }}>
+                {likedItems.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => navigate('/matches')}
+            style={{
+              padding: '6px 12px', borderRadius: 10,
+              background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+              color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            ✨ Совпадения
           </button>
         </div>
-      ) : (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 8px' }}>
+      </div>
+
+      {/* Card Swiper */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 8px' }}>
+        {items.length === 0 && !isLoadingMore ? (
+          <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: 14, padding: 24 }}>
+            Пока нет новых вещей в ленте.<br />Загляните позже!
+          </div>
+        ) : (
           <CardSwiper
             items={items}
             currentIndex={currentIndex}
@@ -289,8 +185,8 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
             onSwipeRight={handleSwipeRight}
             onIndexChange={handleIndexChange}
           />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Hearts burst overlay */}
       {hearts.map(h => (
@@ -327,10 +223,10 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
           >
             <div style={{ fontSize: 48, marginBottom: 8 }}>🎉</div>
             <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px', background: 'linear-gradient(135deg, #6C5CE7, #a29bfe)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              {t('feed.itsAMatch')}
+              Это взаимно!
             </h2>
             <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, margin: '0 0 20px' }}>
-              {matchedOpponent?.username || t('feed.matchDesc')}
+              {matchedOpponent?.username || matchedOpponent?.first_name || 'Пользователь'} тоже хочет обменяться!
             </p>
             <button
               onClick={() => {
@@ -344,7 +240,7 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
                 cursor: 'pointer', marginBottom: 8,
               }}
             >
-              ✨ {t('feed.viewMatches')}
+              ✨ Посмотреть совпадения
             </button>
             <button
               onClick={() => setShowMatchModal(false)}
@@ -355,7 +251,7 @@ const FeedPage: React.FC<FeedPageProps> = ({ likedItems, onLikedItemsChange }) =
                 width: '100%',
               }}
             >
-              {t('feed.continueBrowsing')}
+              Продолжить смотреть
             </button>
           </div>
         </div>

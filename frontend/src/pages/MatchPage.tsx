@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import VideoPlayer from '../components/VideoPlayer'
+import { barterApi, resolveMediaUrl, type MatchResponse } from '../services/api'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
-import { DEMO_MATCHES, type DemoMatch } from '../services/demoData'
-import { ChatIcon, SparklesIcon, RefreshIcon, ClockIcon, CheckIcon, LockIcon, CrownIcon, StarIcon } from '../components/Icons'
+import { ChatIcon, SparklesIcon, RefreshIcon, ClockIcon, CheckIcon, CrownIcon } from '../components/Icons'
 
 const MatchPage: React.FC = () => {
   const navigate = useNavigate()
   const { showBackButton, hideBackButton, hapticFeedback } = useTelegram()
-  const { t } = useLanguage()
-  const [matches, setMatches] = useState<DemoMatch[]>(DEMO_MATCHES)
+  const [matches, setMatches] = useState<MatchResponse[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     showBackButton(() => navigate('/feed'))
@@ -18,72 +17,70 @@ const MatchPage: React.FC = () => {
   }, [showBackButton, hideBackButton, navigate])
 
   useEffect(() => {
-    // In real app: barterApi.getMatches().then(...)
+    barterApi.getMatches()
+      .then(setMatches)
+      .catch((e) => {
+        console.error('[Matches] Failed to load:', e)
+        setMatches([])
+      })
+      .finally(() => setIsLoading(false))
   }, [])
 
-  const handleOpenChat = useCallback((match: DemoMatch) => {
+  const handleOpenChat = useCallback((match: MatchResponse) => {
     hapticFeedback('medium')
 
-    if (match.status === 'completed') {
-      if (match.opponentUsername) {
-        window.Telegram?.WebApp?.openTelegramLink(`https://t.me/${match.opponentUsername}`)
+    if (match.status === 'active') {
+      if (match.opponent.username) {
+        window.Telegram?.WebApp?.openTelegramLink(`https://t.me/${match.opponent.username}`)
       }
     } else {
       navigate(`/payment/${match.id}`)
     }
   }, [navigate, hapticFeedback])
 
-  const getStatusLabel = (status: string): string => {
-    switch (status) {
-      case 'pending': return t('match.statusPending')
-      case 'paid_user1': return t('match.statusPaidYou')
-      case 'paid_user2': return t('match.statusPaidOther')
-      case 'completed': return t('match.statusCompleted')
-      case 'expired': return t('match.statusExpired')
-      default: return status
-    }
-  }
+  // Бэкенд знает только два реальных статуса матча: pending (ждём оплату
+  // хотя бы одной стороны) и active (обе оплатили, чат открыт).
+  const getStatusLabel = (status: string): string =>
+    status === 'active' ? 'Контакт открыт' : 'Ожидает оплаты'
 
-  const getStatusColor = (status: string): string => {
-    switch (status) {
-      case 'completed': return '#2ed573'
-      case 'pending': return '#ffa502'
-      case 'expired': return '#ff4757'
-      default: return '#8888b0'
-    }
-  }
+  const getStatusColor = (status: string): string =>
+    status === 'active' ? '#2ed573' : '#ffa502'
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return <CheckIcon size={12} color="#2ed573" />
-      case 'pending': return <ClockIcon size={12} color="#ffa502" />
-      case 'paid_user1': return <StarIcon size={12} color="#667eea" />
-      case 'paid_user2': return <StarIcon size={12} color="#764ba2" />
-      case 'expired': return <LockIcon size={12} color="#ff4757" />
-      default: return <ClockIcon size={12} color="#8888b0" />
-    }
+  const getStatusIcon = (status: string) =>
+    status === 'active'
+      ? <CheckIcon size={12} color="#2ed573" />
+      : <ClockIcon size={12} color="#ffa502" />
+
+  if (isLoading) {
+    return (
+      <div style={containerStyle}>
+        <div style={{ textAlign: 'center', color: '#5a5a7a', fontSize: 14, marginTop: '30vh' }}>
+          Загрузка...
+        </div>
+      </div>
+    )
   }
 
   return (
     <div style={containerStyle}>
       <h1 style={titleStyle}>
         <SparklesIcon size={22} color="#667eea" />
-        <span style={{ marginLeft: 10 }}>{t('match.myMatches')}</span>
+        <span style={{ marginLeft: 10 }}>Мои совпадения</span>
       </h1>
 
       {matches.length === 0 ? (
         <div style={emptyStyle}>
           <SparklesIcon size={48} color="#5a5a7a" />
-          <p style={emptyTextStyle}>{t('match.empty')}</p>
+          <p style={emptyTextStyle}>Пока нет совпадений</p>
           <p style={emptyHintStyle}>
-            {t('match.emptyHint')}
+            Листайте ленту, чтобы найти интересные вещи для обмена
           </p>
           <button
             style={backToFeedButtonStyle}
             onClick={() => navigate('/feed')}
           >
             <RefreshIcon size={14} color="#fff" />
-            <span style={{ marginLeft: 8 }}>{t('match.toFeed')}</span>
+            <span style={{ marginLeft: 8 }}>К ленте</span>
           </button>
         </div>
       ) : (
@@ -92,7 +89,7 @@ const MatchPage: React.FC = () => {
             <div key={match.id} style={matchCardStyle}>
               <div style={matchVideoContainerStyle}>
                 <VideoPlayer
-                  src={match.matchedVideoUrl}
+                  src={resolveMediaUrl(match.their_item.video_url)}
                   style={matchVideoStyle}
                   autoPlay={true}
                   muted={true}
@@ -102,15 +99,15 @@ const MatchPage: React.FC = () => {
               </div>
 
               <div style={matchInfoStyle}>
-                <h3 style={matchTitleStyle}>{match.matchedTitle}</h3>
-                <p style={matchDescStyle}>{match.matchedDescription}</p>
+                <h3 style={matchTitleStyle}>{match.their_item.title}</h3>
+                <p style={matchDescStyle}>{match.their_item.description}</p>
                 <p style={matchConditionStyle}>
-                  <span style={{ textTransform: 'capitalize' }}>{match.matchedCategory}</span>
+                  <span style={{ textTransform: 'capitalize' }}>{match.their_item.category}</span>
                   <span style={{ margin: '0 6px', color: '#5a5a7a' }}>·</span>
-                  {match.matchedCondition === 'like_new' ? t('match.conditionLikeNew') :
-                   match.matchedCondition === 'good' ? t('match.conditionGood') :
-                   match.matchedCondition === 'fair' ? t('match.conditionFair') :
-                   match.matchedCondition === 'new' ? t('match.conditionNew') : match.matchedCondition}
+                  {match.their_item.condition === 'like_new' ? 'Как новый' :
+                   match.their_item.condition === 'good' ? 'Хорошее' :
+                   match.their_item.condition === 'fair' ? 'Удовлетворительное' :
+                   match.their_item.condition === 'new' ? 'Новый' : match.their_item.condition}
                 </p>
 
                 <div style={statusRowStyle}>
@@ -132,34 +129,27 @@ const MatchPage: React.FC = () => {
                 >
                   <ChatIcon size={14} color="#fff" />
                   <span style={{ marginLeft: 8 }}>
-                    {match.status === 'completed'
-                      ? t('match.openChat')
-                      : t('match.openChatPrice')}
+                    {match.status === 'active'
+                      ? 'Открыть чат'
+                      : 'Открыть чат — оплатить'}
                   </span>
                 </button>
 
-                {match.opponentUsername && match.status === 'completed' && (
+                {match.opponent.username && match.status === 'active' && (
                   <div style={contactInfoStyle}>
                     <div style={contactAvatarContainerStyle}>
                       <img
-                        src={match.opponentAvatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${match.opponentUsername}`}
-                        alt={match.opponentUsername}
+                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${match.opponent.username}`}
+                        alt={match.opponent.username}
                         style={contactAvatarStyle}
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none'
-                          const parent = (e.target as HTMLImageElement).parentElement
-                          if (parent) {
-                            const fallback = document.createElement('div')
-                            fallback.textContent = match.opponentUsername![0].toUpperCase()
-                            fallback.style.cssText = 'width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:#fff;flex-shrink:0;'
-                            parent.insertBefore(fallback, (e.target as HTMLImageElement))
-                          }
                         }}
                       />
                     </div>
                     <div style={contactTextStyle}>
-                      <span style={contactLabelStyle}>{t('match.owner')}</span>
-                      <span style={usernameStyle}>@{match.opponentUsername}</span>
+                      <span style={contactLabelStyle}>Владелец</span>
+                      <span style={usernameStyle}>@{match.opponent.username}</span>
                     </div>
                     <CrownIcon size={14} color="#FFD700" style={{ marginLeft: 'auto', opacity: 0.5 }} />
                   </div>
@@ -177,7 +167,7 @@ const containerStyle: React.CSSProperties = {
   flex: 1,
   padding: '20px 16px',
   paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)',
-  minHeight: 'var(--app-height, 100vh)',
+  minHeight: '100vh',
   overflowY: 'auto',
   background: '#0d0d1a',
 }

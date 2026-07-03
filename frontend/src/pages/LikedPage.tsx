@@ -1,12 +1,8 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
-import { type FeedItem } from '../services/api'
-import { SparklesIcon, HeartIcon, ChatIcon, StarIcon } from '../components/Icons'
-
-// Demo users who "selected me"
-import { DEMO_USERS, DEMO_ITEMS } from '../services/demoData'
+import { barterApi, resolveMediaUrl, type FeedItem, type ReceivedLike } from '../services/api'
+import { SparklesIcon, HeartIcon, StarIcon } from '../components/Icons'
 
 interface LikedPageProps {
   likedItems: FeedItem[]
@@ -20,47 +16,30 @@ const CATEGORY_EMOJIS: Record<string, string> = {
   sports: '⚽', toys: '🎲', other: '📦',
 }
 
-// Generate "who picked me" demo data
-function generatePickedMe() {
-  const count = 3 + Math.floor(Math.random() * 4) // 3-6 people
-  const result: {
-    user: { username: string; avatarUrl: string; isPro: boolean }
-    item: FeedItem
-  }[] = []
-
-  const usedUsers = new Set<string>()
-
-  for (let i = 0; i < count; i++) {
-    let userIdx = Math.floor(Math.random() * DEMO_USERS.length)
-    let tries = 0
-    while (usedUsers.has(DEMO_USERS[userIdx].username) && tries < 10) {
-      userIdx = (userIdx + 1) % DEMO_USERS.length
-      tries++
-    }
-    const user = DEMO_USERS[userIdx]
-    usedUsers.add(user.username)
-
-    const item = DEMO_ITEMS[Math.floor(Math.random() * DEMO_ITEMS.length)]
-
-    result.push({ user, item })
-  }
-
-  return result
-}
-
 const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
   const navigate = useNavigate()
   const { showBackButton, hideBackButton, hapticFeedback } = useTelegram()
-  const { t } = useLanguage()
   const [tab, setTab] = React.useState<Tab>('i_picked')
-  const [pickedMe] = React.useState(generatePickedMe)
+  const [pickedMe, setPickedMe] = React.useState<ReceivedLike[]>([])
+  const [loadingPickedMe, setLoadingPickedMe] = React.useState(false)
+  const [selectedForTrade, setSelectedForTrade] = React.useState<number | null>(null)
 
   React.useEffect(() => {
     showBackButton(() => navigate('/feed'))
     return () => hideBackButton()
   }, [showBackButton, hideBackButton, navigate])
 
-  const [selectedForTrade, setSelectedForTrade] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (tab !== 'picked_me') return
+    setLoadingPickedMe(true)
+    barterApi.getReceivedLikes()
+      .then(setPickedMe)
+      .catch((e) => {
+        console.error('[Liked] Failed to load received likes:', e)
+        setPickedMe([])
+      })
+      .finally(() => setLoadingPickedMe(false))
+  }, [tab])
 
   return (
     <div style={{
@@ -73,15 +52,15 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
         background: 'rgba(13,13,26,0.8)', backdropFilter: 'blur(12px)',
       }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          {t('liked.title')}
+          Обмен
           {(tab === 'i_picked' && likedItems.length > 0) && (
             <span style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.4)' }}>
-              {likedItems.length} {t('liked.itemsCount')}
+              {likedItems.length} шт.
             </span>
           )}
           {(tab === 'picked_me' && pickedMe.length > 0) && (
             <span style={{ fontSize: 14, fontWeight: 600, color: '#ff6b9d' }}>
-              {pickedMe.length} {t('liked.chosenBy')}
+              {pickedMe.length} → мне
             </span>
           )}
         </h1>
@@ -100,7 +79,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
             }}
           >
             <HeartIcon size={14} color={tab === 'i_picked' ? '#ff6b9d' : 'rgba(255,255,255,0.3)'} />
-            {t('liked.iPicked')} {likedItems.length > 0 && `(${likedItems.length})`}
+            Я выбрал {likedItems.length > 0 && `(${likedItems.length})`}
           </button>
           <button
             onClick={() => setTab('picked_me')}
@@ -114,7 +93,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
             }}
           >
             <StarIcon size={14} color={tab === 'picked_me' ? '#6C5CE7' : 'rgba(255,255,255,0.3)'} />
-            {t('liked.pickedMe')} {pickedMe.length > 0 && `(${pickedMe.length})`}
+            Меня выбрали {pickedMe.length > 0 && `(${pickedMe.length})`}
           </button>
         </div>
       </div>
@@ -124,9 +103,9 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
         likedItems.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>💔</div>
-            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>{t('liked.emptyTitle')}</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>Вы ещё ничего не выбрали</h2>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: 0, lineHeight: 1.5 }}>
-              {t('liked.emptyDesc')}
+              Свайпайте вправо на понравившиеся вещи<br />и они появятся здесь
             </p>
             <button
               onClick={() => navigate('/feed')}
@@ -136,14 +115,14 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                 border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer',
               }}
             >
-              🔄 {t('liked.backToFeed')}
+              🔄 Смотреть ленту
             </button>
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {likedItems.map((item) => {
-                const isSelected = String(selectedForTrade) === String(item.id)
+                const isSelected = selectedForTrade === item.id
                 return (
                   <div
                     key={item.id}
@@ -162,7 +141,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                       overflow: 'hidden',
                     }}>
                     <video
-                      src={item.videoUrl}
+                      src={resolveMediaUrl(item.video_url)}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       muted loop playsInline autoPlay
                       onMouseOver={e => (e.target as HTMLVideoElement).play()}
@@ -179,7 +158,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                         background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
                         fontSize: 10, fontWeight: 600,
                       }}>
-                        {CATEGORY_EMOJIS[item.category] || '📦'} {item.category}
+                        {CATEGORY_EMOJIS[item.category || 'other'] || '📦'} {item.category || 'Разное'}
                       </span>
                       {/* Selected badge */}
                       {isSelected && (
@@ -189,7 +168,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                           background: 'rgba(108,92,231,0.8)',
                           fontSize: 10, fontWeight: 700, color: '#fff',
                         }}>
-                          ✓ {t('liked.selectedForTrade')}
+                          ✓ Меняю
                         </span>
                       )}
                     </div>
@@ -197,7 +176,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                     <div style={{ padding: '8px 10px 10px' }}>
                       <h3 style={{ fontSize: 13, fontWeight: 700, margin: 0, lineHeight: 1.3 }}>{item.title}</h3>
                       <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: '4px 0 0', lineHeight: 1.3 }}>
-                        {item.description.slice(0, 60)}...
+                        {(item.description || '').slice(0, 60)}
                       </p>
                       <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
                         <button
@@ -206,7 +185,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                             if (isSelected) {
                               setSelectedForTrade(null)
                             } else {
-                              setSelectedForTrade(String(item.id))
+                              setSelectedForTrade(item.id)
                               hapticFeedback('light')
                             }
                           }}
@@ -219,7 +198,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                             fontFamily: 'inherit',
                           }}
                         >
-                          {isSelected ? `${t('liked.selectedForTrade')}` : t('liked.wantToGive')}
+                          {isSelected ? '✓ Меняю на это' : 'Хочу отдать'}
                         </button>
                         <button
                           onClick={(e) => {
@@ -235,7 +214,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontFamily: 'inherit',
                           }}
-                          aria-label={t('liked.remove')}
+                          aria-label="Убрать"
                         >
                           ✕
                         </button>
@@ -256,7 +235,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                   fontSize: 12, color: 'rgba(255,255,255,0.6)',
                   textAlign: 'center',
                 }}>
-                  {t('liked.selectedHint')}
+                  Выбрана вещь для обмена. Теперь найдите что хотите получить взамен.
                 </div>
               )}
               <button
@@ -270,7 +249,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                 }}
               >
                 <SparklesIcon size={16} color="#fff" />
-                {t('liked.viewMatches')}
+                Посмотреть совпадения
               </button>
             </div>
           </div>
@@ -281,10 +260,16 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
       {tab === 'picked_me' && (
         <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', margin: '0 4px 12px', lineHeight: 1.4 }}>
-            {t('liked.tradingDesc')}
+            Кто-то лайкнул вашу вещь! Личность откроется, когда вы лайкнете в ответ — тогда это станет взаимным совпадением.
           </p>
 
-          {pickedMe.map((entry, i) => (
+          {loadingPickedMe && (
+            <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 13, padding: 24 }}>
+              Загрузка...
+            </div>
+          )}
+
+          {!loadingPickedMe && pickedMe.map((entry, i) => (
             <div
               key={i}
               style={{
@@ -293,7 +278,7 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                 border: '1px solid rgba(255,255,255,0.06)',
               }}
             >
-              {/* User info */}
+              {/* Anonymous liker badge — личность скрыта до взаимного матча */}
               <div style={{
                 padding: '10px 12px',
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -301,26 +286,23 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
               }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: '50%',
-                  overflow: 'hidden', flexShrink: 0,
+                  flexShrink: 0,
                   border: '1px solid rgba(102,126,234,0.3)',
                   background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 700, color: '#fff',
+                  fontSize: 14,
                 }}>
-                  {entry.user.username[0].toUpperCase()}
+                  ❔
                 </div>
                 <div style={{ flex: 1 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#e8e8f0' }}>
-                    @{entry.user.username}
+                    Кто-то заинтересован
                   </span>
-                  {entry.user.isPro && (
-                    <span style={{ marginLeft: 6, fontSize: 10, color: '#FFD700' }}>⭐ {t('pro.title')}</span>
-                  )}
                 </div>
                 <button
                   onClick={() => {
                     hapticFeedback('medium')
-                    navigate(`/matches`)
+                    navigate('/feed')
                   }}
                   style={{
                     padding: '6px 12px', borderRadius: 8,
@@ -329,30 +311,27 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
                     fontFamily: 'inherit',
                   }}
                 >
-                  <ChatIcon size={11} color="#fff" />
-                  <span style={{ marginLeft: 4 }}>{t('liked.want')}</span>
+                  Лайкнуть в ответ
                 </button>
               </div>
 
-              {/* What they offer */}
+              {/* Which of your items they liked */}
               <div style={{ display: 'flex', gap: 10, padding: '10px 12px' }}>
                 <div style={{
                   width: 80, height: 80, borderRadius: 10, overflow: 'hidden',
                   background: '#1a1a2e', flexShrink: 0,
                 }}>
                   <video
-                    src={entry.item.videoUrl}
+                    src={resolveMediaUrl(entry.liked_item.video_url)}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     muted loop playsInline autoPlay
                   />
                 </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <h4 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{entry.item.title}</h4>
-                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: '4px 0 0', lineHeight: 1.3 }}>
-                    {entry.item.description.slice(0, 80)}...
-                  </p>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>Лайкнули вашу вещь:</span>
+                  <h4 style={{ fontSize: 14, fontWeight: 700, margin: '2px 0 0' }}>{entry.liked_item.title}</h4>
                   <span style={{ fontSize: 11, color: '#5a5a7a', marginTop: 4 }}>
-                    {CATEGORY_EMOJIS[entry.item.category] || '📦'} {entry.item.category}
+                    {CATEGORY_EMOJIS[entry.liked_item.category || 'other'] || '📦'} {entry.liked_item.category || 'Разное'}
                   </span>
                 </div>
               </div>
@@ -360,16 +339,16 @@ const LikedPage: React.FC<LikedPageProps> = ({ likedItems, onRemoveLiked }) => {
           ))}
 
           {/* Empty state if no one picked you */}
-          {pickedMe.length === 0 && (
+          {!loadingPickedMe && pickedMe.length === 0 && (
             <div style={{
               flex: 1, display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center',
               padding: 60, textAlign: 'center',
             }}>
               <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
-              <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px' }}>{t('liked.noOnePicked')}</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px' }}>Вас пока никто не выбрал</h2>
               <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
-                {t('liked.noOnePickedHint')}
+                Загрузите свою вещь в ленту<br />и другие пользователи смогут выбрать вас
               </p>
             </div>
           )}

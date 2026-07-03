@@ -1,11 +1,11 @@
 from typing import AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_async_session
 from app.core.security import decode_jwt_token, verify_telegram_hash, get_telegram_user_from_init_data
-from app.core.config import settings
 from app.models.user import User
 
 
@@ -20,7 +20,6 @@ async def get_current_user(
     """
     user: Optional[User] = None
 
-    # Try JWT first
     if authorization and authorization.startswith("Bearer "):
         token = authorization[len("Bearer "):]
         payload = decode_jwt_token(token)
@@ -32,7 +31,8 @@ async def get_current_user(
                 result = await db.execute(query)
                 user = result.scalar_one_or_none()
 
-    # Fallback to Telegram init data
+    # ИСПРАВЛЕНО: раньше здесь передавался пустой bot_token (""), из-за чего
+    # HMAC-секрет был известной константой и любой мог подделать init_data.
     if user is None and x_telegram_init_data:
         parsed = verify_telegram_hash(x_telegram_init_data, settings.BOT_TOKEN)
         if parsed:
