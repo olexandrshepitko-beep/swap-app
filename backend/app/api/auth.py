@@ -36,7 +36,7 @@ async def auth_telegram(
     Creates user if not exists. Returns JWT token.
     """
     # Verify init data
-    parsed = verify_telegram_hash(req.init_data, settings.BOT_TOKEN)
+    parsed = verify_telegram_hash(req.init_data, settings.BOT_TOKEN or "")
     if not parsed:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

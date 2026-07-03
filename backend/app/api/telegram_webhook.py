@@ -22,7 +22,7 @@ def _verify_secret(secret_token: str | None) -> None:
     Никто другой этого значения не знает и не может его подобрать за разумное время
     (constant-time сравнение — чтобы не подсказывать через timing attack).
     """
-    if not secret_token or not hmac.compare_digest(secret_token, settings.TELEGRAM_WEBHOOK_SECRET):
+    if not secret_token or not hmac.compare_digest(secret_token, settings.TELEGRAM_WEBHOOK_SECRET or ""):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad secret token")
 
 

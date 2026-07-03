@@ -100,9 +100,12 @@ async def upload_video(file_bytes: bytes, filename: str) -> str:
 
     Ограничение Bot API: до 50 МБ на файл через этот метод.
     """
+    token = settings.BOT_TOKEN
+    if not token:
+        raise TelegramBotAPIError("BOT_TOKEN not configured")
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
-            f"{BOT_API_BASE}/sendVideo",
+            f"https://api.telegram.org/bot{token}/sendVideo",
             data={"chat_id": settings.STORAGE_CHAT_ID, "supports_streaming": "true"},
             files={"video": (filename, file_bytes, "video/mp4")},
         )

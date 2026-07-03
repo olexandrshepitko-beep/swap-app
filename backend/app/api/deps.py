@@ -34,7 +34,7 @@ async def get_current_user(
     # ИСПРАВЛЕНО: раньше здесь передавался пустой bot_token (""), из-за чего
     # HMAC-секрет был известной константой и любой мог подделать init_data.
     if user is None and x_telegram_init_data:
-        parsed = verify_telegram_hash(x_telegram_init_data, settings.BOT_TOKEN)
+        parsed = verify_telegram_hash(x_telegram_init_data, settings.BOT_TOKEN or "")
         if parsed:
             user_data = get_telegram_user_from_init_data(parsed)
             if user_data:
