@@ -53,6 +53,9 @@ const CreateItemPage: React.FC = () => {
     return () => hideBackButton()
   }, [step, showBackButton, hideBackButton, navigate])
 
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
   // Update main button per step
   useEffect(() => {
     switch (step) {
@@ -82,9 +85,6 @@ const CreateItemPage: React.FC = () => {
     }
     return () => hideMainButton()
   }, [step, videoUrl, title, isSubmitting])
-
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
