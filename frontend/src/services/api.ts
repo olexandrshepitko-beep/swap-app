@@ -1,23 +1,18 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 
-// Базовий URL API бекенду — обов'язково задати через VITE_API_URL
-const BASE_URL = import.meta.env.VITE_API_URL
-if (!BASE_URL) {
-  console.warn('[API] VITE_API_URL не задано! Використовується localhost:8000 для dev')
-}
-
-const API_BASE = BASE_URL || 'http://localhost:8000'
+// Базовый URL API бэкенда — заменить на продакшен URL
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://api.barter.app'
 
 function createApiClient(): AxiosInstance {
   const client = axios.create({
-    baseURL: API_BASE,
+    baseURL: BASE_URL,
     timeout: 30_000,
     headers: {
       'Content-Type': 'application/json',
     },
   })
 
-  // Interceptor: додаємо initData Telegram в кожен запит
+  // Interceptor: добавляем initData Telegram в заголовок каждого запроса
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     const initData = window.Telegram?.WebApp?.initData
 
@@ -26,7 +21,7 @@ function createApiClient(): AxiosInstance {
       config.headers.set('Authorization', `tma ${initData}`)
     }
 
-    // Додаємо userId якщо доступний
+    // Добавляем userId если доступен
     const userId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id
     if (userId) {
       config.headers.set('X-User-Id', String(userId))
@@ -35,7 +30,7 @@ function createApiClient(): AxiosInstance {
     return config
   })
 
-  // Interceptor: обробка помилок
+  // Interceptor: обработка ошибок
   client.interceptors.response.use(
     (response) => response,
     (error) => {
@@ -44,12 +39,13 @@ function createApiClient(): AxiosInstance {
         console.error(`[API Error] ${status}:`, data)
 
         if (status === 401) {
-          console.warn('[API] Не авторизовано — перевірте initData Telegram')
+          // Неавторизован — возможно, неверный initData
+          console.warn('[API] Unauthorized — check Telegram initData')
         }
       } else if (error.request) {
-        console.error('[API] Мережева помилка — сервер не відповідає')
+        console.error('[API] Network error — no response received')
       } else {
-        console.error('[API] Помилка запиту:', error.message)
+        console.error('[API] Request setup error:', error.message)
       }
       return Promise.reject(error)
     }
@@ -60,38 +56,24 @@ function createApiClient(): AxiosInstance {
 
 const api = createApiClient()
 
-// ========== Бекенд API типи (відповідають backend FastAPI) ==========
+// ========== API Methods ==========
 
 export interface CreateItemPayload {
-  video_file_id: string
   title: string
-  description?: string
-  category?: string
-  condition: string  // new, like_new, good, fair
-}
-
-export interface ItemResponse {
-  id: number        // !!! int, не string
-  owner_id: number
-  video_file_id: string
-  title: string
-  description: string | null
-  category: string | null
+  description: string
+  category: string
   condition: string
-  status: string
-  created_at: string
+  videoBlob?: Blob
 }
 
-export interface ItemFeedResponse {
-  items: ItemResponse[]
-  page: number
-  page_size: number
-  total: number | null
+export interface CreateItemResponse {
+  id: string
+  videoUrl: string
+  thumbnailUrl?: string
 }
 
-// Для фронтенд-демо-даних (локальне використання)
 export interface FeedItem {
-  id: number
+  id: string
   title: string
   description: string
   category: string
@@ -99,35 +81,26 @@ export interface FeedItem {
   videoUrl: string
   thumbnailUrl?: string
   isPro: boolean
-  titleKey?: string
-  descKey?: string
-}
-
-export interface SwipeResponse {
-  match_id: number | null
-  message: string
 }
 
 export interface MatchResponse {
-  id: number
-  item_a_id: number
-  item_b_id: number
+  id: string
+  itemId: string
+  matchedItemId: string
+  matchedVideoUrl: string
+  matchedTitle: string
+  matchedDescription: string
+  matchedCondition: string
+  matchedCategory: string
   status: string
-  created_at: string
+  opponentUsername?: string
+  opponentAvatarUrl?: string
 }
 
-export interface MatchDetailResponse {
-  id: number
-  item_a_id: number
-  item_b_id: number
-  user_a_id: number
-  user_b_id: number
-  status: string
-  created_at: string
-}
-
-export interface PaymentInitRequest {
-  match_id: number
+export interface PaymentRequiredResponse {
+  requiresPayment: boolean
+  amount: string
+  matchId: string
 }
 
 export interface PaymentInitResponse {
@@ -136,21 +109,15 @@ export interface PaymentInitResponse {
   amount: number
   currency: string
   status: string
+  invoice_link: string
 }
 
 export interface PaymentStatusResponse {
   match_id: number
   user_id: number
   amount: number
-  status: string
-  provider_payment_id: string | null
-}
-
-export interface SubscriptionStatusResponse {
-  active: boolean
-  start_date: string | null
-  end_date: string | null
-  auto_renew: boolean
+  status: 'init' | 'paid' | 'refunded' | 'failed'
+  provider_payment_id?: string
 }
 
 export interface SubscriptionCreateResponse {
@@ -158,92 +125,86 @@ export interface SubscriptionCreateResponse {
   amount: number
   currency: string
   status: string
+  invoice_link: string
 }
 
-export interface ChatUnlockResponse {
-  unlocked: boolean
-  deep_link: string | null
-  message: string
-}
-
-export interface AuthResponse {
-  token: string
-  user_id: number
-  telegram_id: number
-  first_name: string
-  username: string | null
-  is_new: boolean
+export interface SubscriptionStatusResponse {
+  active: boolean
+  start_date?: string
+  end_date?: string
+  auto_renew: boolean
 }
 
 export const barterApi = {
-  // ===== Аутентифікація =====
-  authTelegram: async (initData: string): Promise<AuthResponse> => {
-    const { data } = await api.post<AuthResponse>('/auth/telegram', { init_data: initData })
-    return data
-  },
+  /** Create a new barter item */
+  createItem: async (payload: CreateItemPayload): Promise<CreateItemResponse> => {
+    const formData = new FormData()
+    formData.append('title', payload.title)
+    formData.append('description', payload.description)
+    formData.append('category', payload.category)
+    formData.append('condition', payload.condition)
+    if (payload.videoBlob) {
+      formData.append('video', payload.videoBlob, 'item_video.mp4')
+    }
 
-  // ===== Товари / Items =====
-  createItem: async (payload: CreateItemPayload): Promise<ItemResponse> => {
-    const { data } = await api.post<ItemResponse>('/items', payload)
-    return data
-  },
-
-  getFeed: async (page: number = 1, pageSize: number = 20): Promise<ItemFeedResponse> => {
-    const { data } = await api.get<ItemFeedResponse>('/items/feed', {
-      params: { page, page_size: pageSize },
+    const { data } = await api.post<CreateItemResponse>('/items', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
     return data
   },
 
-  getItem: async (itemId: number): Promise<ItemResponse> => {
-    const { data } = await api.get<ItemResponse>(`/items/${itemId}`)
-    return data
-  },
-
-  // ===== Свайпи / Swipe =====
-  likeItem: async (itemId: number): Promise<SwipeResponse> => {
-    const { data } = await api.post<SwipeResponse>('/swipe', { item_id: itemId, direction: 'like' })
-    return data
-  },
-
-  skipItem: async (itemId: number): Promise<SwipeResponse> => {
-    const { data } = await api.post<SwipeResponse>('/swipe', { item_id: itemId, direction: 'pass' })
-    return data
-  },
-
-  // ===== Матчі / Matches =====
-  getMatches: async (statusFilter?: string): Promise<MatchResponse[]> => {
-    const { data } = await api.get<MatchResponse[]>('/matches', {
-      params: statusFilter ? { status_filter: statusFilter } : {},
+  /** Get feed items */
+  getFeed: async (page: number = 1, limit: number = 20): Promise<FeedItem[]> => {
+    const { data } = await api.get<FeedItem[]>('/feed', {
+      params: { page, limit },
     })
     return data
   },
 
-  // ===== Платежі / Payment =====
-  getPaymentStatus: async (matchId: number): Promise<PaymentStatusResponse> => {
-    const { data } = await api.get<PaymentStatusResponse>(`/payment/status/${matchId}`)
+  /** Like / swipe right on an item */
+  likeItem: async (itemId: string): Promise<{ match?: MatchResponse }> => {
+    const { data } = await api.post<{ match?: MatchResponse }>(`/items/${itemId}/like`)
     return data
   },
 
-  initiatePayment: async (matchId: number): Promise<PaymentInitResponse> => {
-    const { data } = await api.post<PaymentInitResponse>('/payment/init', { match_id: matchId })
+  /** Skip / swipe left on an item */
+  skipItem: async (itemId: string): Promise<void> => {
+    await api.post(`/items/${itemId}/skip`)
+  },
+
+  /** Get matches for current user */
+  getMatches: async (): Promise<MatchResponse[]> => {
+    const { data } = await api.get<MatchResponse[]>('/matches')
     return data
   },
 
-  // ===== PRO підписка =====
+  /** Check payment status for a match (реальный путь бэкенда) */
+  getPaymentStatus: async (matchId: string): Promise<PaymentStatusResponse | null> => {
+    try {
+      const { data } = await api.get<PaymentStatusResponse>(`/payment/status/${matchId}`)
+      return data
+    } catch {
+      return null // 404 = платёж ещё не инициирован
+    }
+  },
+
+  /** Инициировать оплату матча — возвращает invoice_link для openInvoice() */
+  initiatePayment: async (matchId: string): Promise<PaymentInitResponse> => {
+    const { data } = await api.post<PaymentInitResponse>('/payment/init', {
+      match_id: Number(matchId),
+    })
+    return data
+  },
+
+  /** Get PRO subscription status */
   getProStatus: async (): Promise<SubscriptionStatusResponse> => {
     const { data } = await api.get<SubscriptionStatusResponse>('/subscription/status')
     return data
   },
 
+  /** Создать заявку на PRO — возвращает invoice_link для openInvoice() */
   subscribePro: async (): Promise<SubscriptionCreateResponse> => {
-    const { data } = await api.post<SubscriptionCreateResponse>('/subscription/create', {})
-    return data
-  },
-
-  // ===== Чат =====
-  getChatUnlock: async (matchId: number): Promise<ChatUnlockResponse> => {
-    const { data } = await api.get<ChatUnlockResponse>(`/chat/unlock/${matchId}`)
+    const { data } = await api.post<SubscriptionCreateResponse>('/subscription/create')
     return data
   },
 }

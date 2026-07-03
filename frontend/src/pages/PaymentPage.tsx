@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTelegram } from '../telegram/TelegramProvider'
-import { useLanguage } from '../i18n/LanguageContext'
+import { barterApi } from '../services/api'
 import { CheckIcon, ClockIcon, LockIcon, ChatIcon, StarIcon, WalletIcon, UserIcon } from '../components/Icons'
 
 const PaymentPage: React.FC = () => {
   const { matchId } = useParams<{ matchId: string }>()
   const navigate = useNavigate()
-  const { showBackButton, hideBackButton, showMainButton, hideMainButton, hapticFeedback } = useTelegram()
-  const { t } = useLanguage()
+  const { showBackButton, hideBackButton, showMainButton, hideMainButton, hapticFeedback, openInvoice } = useTelegram()
 
   const [hasPaid, setHasPaid] = useState(false)
   const [opponentPaid, setOpponentPaid] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     showBackButton(() => navigate(-1))
@@ -24,7 +25,7 @@ const PaymentPage: React.FC = () => {
 
   useEffect(() => {
     if (hasPaid && opponentPaid) {
-      showMainButton(t('payment.openChat'), () => {
+      showMainButton('Открыть чат в Telegram', () => {
         hapticFeedback('heavy')
         window.Telegram?.WebApp?.openTelegramLink('https://t.me/BarterMarketBot?start=chat_' + matchId)
       })
@@ -34,20 +35,58 @@ const PaymentPage: React.FC = () => {
     return () => hideMainButton()
   }, [hasPaid, opponentPaid, showMainButton, hideMainButton, hapticFeedback, matchId])
 
-  const handlePayment = useCallback(() => {
+  // Опрос статуса с бэкенда — единственный источник правды.
+  // Реальное подтверждение приходит на бэкенд асинхронно через
+  // /telegram/webhook (successful_payment), поэтому после закрытия
+  // окна оплаты мы поллим статус, а не доверяем колбэку openInvoice.
+  const pollStatus = useCallback(() => {
+    if (!matchId) return
+    if (pollRef.current) clearInterval(pollRef.current)
+
+    pollRef.current = setInterval(async () => {
+      const status = await barterApi.getPaymentStatus(matchId)
+      if (status?.status === 'paid') {
+        setHasPaid(true)
+        hapticFeedback('success')
+        if (pollRef.current) clearInterval(pollRef.current)
+        // TODO: аналогично запросить статус оплаты второй стороны, когда
+        // появится соответствующий эндпоинт (например GET /matches/{id}
+        // с полем opponent_paid) — сейчас бэкенд отдаёт статус только
+        // текущего пользователя.
+      }
+    }, 2500)
+  }, [matchId, hapticFeedback])
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
+
+  const handlePayment = useCallback(async () => {
+    if (!matchId) return
     setIsProcessing(true)
+    setError(null)
     hapticFeedback('medium')
 
-    setTimeout(() => {
-      setHasPaid(true)
-      setIsProcessing(false)
-      hapticFeedback('success')
+    try {
+      const { invoice_link } = await barterApi.initiatePayment(matchId)
 
-      setTimeout(() => {
-        setOpponentPaid(true)
-      }, 2000)
-    }, 1500)
-  }, [hapticFeedback])
+      openInvoice(invoice_link, (status) => {
+        setIsProcessing(false)
+        if (status === 'paid') {
+          // Оптимистичный UI — но hasPaid по-настоящему подтвердит poll ниже
+          pollStatus()
+        } else if (status === 'failed' || status === 'cancelled') {
+          hapticFeedback('error')
+        }
+      })
+    } catch (e) {
+      setIsProcessing(false)
+      setError('Не удалось начать оплату. Попробуйте ещё раз.')
+      hapticFeedback('error')
+    }
+  }, [matchId, hapticFeedback, openInvoice, pollStatus])
 
   const bothPaid = hasPaid && opponentPaid
 
@@ -68,11 +107,11 @@ const PaymentPage: React.FC = () => {
         </div>
 
         <h1 style={titleStyle}>
-          {bothPaid ? t('payment.contactOpen') : t('payment.payForContact')}
+          {bothPaid ? 'Контакт открыт!' : 'Оплата контакта'}
         </h1>
 
         <p style={descriptionStyle}>
-          {t('payment.desc')}
+          Контакт владельца откроется после оплаты обеими сторонами.
         </p>
 
         {/* Status cards */}
@@ -82,9 +121,9 @@ const PaymentPage: React.FC = () => {
               {hasPaid ? <CheckIcon size={20} color="#2ed573" /> : <ClockIcon size={20} color="#ffa502" />}
             </span>
             <div>
-              <p style={statusLabelStyle}>{t('payment.you')}</p>
+              <p style={statusLabelStyle}>Вы</p>
               <p style={statusValueStyle}>
-                {hasPaid ? t('payment.paid') : t('payment.waiting')}
+                {hasPaid ? 'Оплачено' : 'Ожидает оплаты'}
               </p>
             </div>
           </div>
@@ -98,9 +137,9 @@ const PaymentPage: React.FC = () => {
               {opponentPaid ? <CheckIcon size={20} color="#2ed573" /> : <ClockIcon size={20} color="#ffa502" />}
             </span>
             <div>
-              <p style={statusLabelStyle}>{t('payment.owner')}</p>
+              <p style={statusLabelStyle}>Владелец вещи</p>
               <p style={statusValueStyle}>
-                {opponentPaid ? t('payment.paid') : t('payment.waiting')}
+                {opponentPaid ? 'Оплачено' : 'Ожидает оплаты'}
               </p>
             </div>
           </div>
@@ -110,7 +149,7 @@ const PaymentPage: React.FC = () => {
         {!bothPaid && (
           <div style={paymentCardStyle}>
             <div style={priceRowStyle}>
-              <span style={priceLabelStyle}>{t('payment.cost')}</span>
+              <span style={priceLabelStyle}>Стоимость открытия:</span>
               <span style={priceValueStyle}>$0.50</span>
             </div>
 
@@ -121,11 +160,11 @@ const PaymentPage: React.FC = () => {
                 disabled={isProcessing}
               >
                 {isProcessing ? (
-                  t('payment.processing')
+                  'Обработка...'
                 ) : (
                   <>
                     <WalletIcon size={16} color="#fff" />
-                    <span style={{ marginLeft: 8 }}>{t('payment.payViaTelegram')}</span>
+                    <span style={{ marginLeft: 8 }}>Оплатить через Telegram</span>
                   </>
                 )}
               </button>
@@ -139,9 +178,9 @@ const PaymentPage: React.FC = () => {
             <div style={avatarStyle}>
               {matchId?.[0]?.toUpperCase() || '?'}
             </div>
-            <p style={usernameTextStyle}>@username_власника</p>
+            <p style={usernameTextStyle}>@username_владельца</p>
             <p style={hintTextStyle}>
-              {t('payment.chatHint')}
+              Нажмите кнопку ниже, чтобы открыть чат
             </p>
           </div>
         )}
@@ -151,19 +190,19 @@ const PaymentPage: React.FC = () => {
           <div style={featureItemStyle}>
             <LockIcon size={14} color="#5a5a7a" />
             <span style={featureTextStyle}>
-              {t('payment.feature1')}
+              Ваши данные скрыты до оплаты обеими сторонами
             </span>
           </div>
           <div style={featureItemStyle}>
             <WalletIcon size={14} color="#5a5a7a" />
             <span style={featureTextStyle}>
-              {t('payment.feature2')}
+              Средства возвращаются, если вторая сторона не оплатит
             </span>
           </div>
           <div style={featureItemStyle}>
             <StarIcon size={14} color="#5a5a7a" />
             <span style={featureTextStyle}>
-              {t('payment.feature3')}
+              PRO пользователи платят $0.25
             </span>
           </div>
         </div>
@@ -179,7 +218,7 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  minHeight: 'var(--app-height, 100vh)',
+  minHeight: '100vh',
   overflowY: 'auto',
   background: '#0d0d1a',
 }

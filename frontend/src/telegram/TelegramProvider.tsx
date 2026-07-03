@@ -22,6 +22,13 @@ interface TelegramContextValue {
   openTelegramLink: (url: string) => void
   /** Send data back to bot */
   sendData: (data: string) => void
+  /**
+   * Открыть нативный UI оплаты Telegram. callback вызывается с итоговым
+   * статусом, но это ТОЛЬКО для UX (например, показать спиннер) —
+   * подтверждение реальной оплаты приходит на бэкенд отдельно, через
+   * защищённый /telegram/webhook, а не через этот callback.
+   */
+  openInvoice: (url: string, callback?: (status: 'paid' | 'cancelled' | 'failed' | 'pending') => void) => void
 }
 
 const TelegramContext = createContext<TelegramContextValue | null>(null)
@@ -115,6 +122,15 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     webApp.sendData(data)
   }, [])
 
+  const openInvoice = useCallback(
+    (url: string, callback?: (status: 'paid' | 'cancelled' | 'failed' | 'pending') => void) => {
+      const webApp = getWebApp()
+      if (!webApp) return
+      webApp.openInvoice(url, callback)
+    },
+    []
+  )
+
   return (
     <TelegramContext.Provider
       value={{
@@ -128,6 +144,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
         hapticFeedback,
         openTelegramLink,
         sendData,
+        openInvoice,
       }}
     >
       {children}

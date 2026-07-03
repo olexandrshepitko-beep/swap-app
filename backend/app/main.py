@@ -4,18 +4,12 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import settings
 from app.core.database import get_engine, get_base, dispose_engine
-from app.api import auth, items, swipe, match, payment, chat, subscription
+from app.api import auth, items, swipe, match, payment, chat, subscription, telegram_webhook
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Initialize database tables on startup."""
-    engine = get_engine()
-    base = get_base()
-    async with engine.begin() as conn:
-        await conn.run_sync(base.metadata.create_all)
     yield
     await dispose_engine()
 
@@ -27,7 +21,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow Telegram WebApp and development origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -40,10 +33,9 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Content-Type", "Authorization", "X-Telegram-Init-Data", "X-User-Id"],
+    allow_headers=["*"],
 )
 
-# Register routers
 app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(swipe.router)
@@ -51,9 +43,15 @@ app.include_router(match.router)
 app.include_router(payment.router)
 app.include_router(chat.router)
 app.include_router(subscription.router)
+app.include_router(telegram_webhook.router)
 
 
 @app.get("/health")
 async def health():
-    """Healthcheck — instant, no DB dependency."""
     return {"status": "ok", "service": "barter-marketplace-api"}
+
+
+# ВНИМАНИЕ: /debug эндпоинт УДАЛЁН — он отдавал без авторизации префикс
+# BOT_TOKEN и наличие/отсутствие SECRET_KEY в env любому анонимному запросу.
+# Если нужен health/diag — делайте отдельный роут за админ-авторизацией,
+# не паблик GET.

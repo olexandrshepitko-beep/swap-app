@@ -1,15 +1,13 @@
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session
+from app.core.config import settings
 from app.models.user import User
-from app.models.payment import Payment
-from app.models.match import Match
+from app.services import telegram_bot_service
 
 router = APIRouter(prefix="/payment", tags=["payment"])
 
@@ -24,11 +22,7 @@ class PaymentInitResponse(BaseModel):
     amount: float
     currency: str
     status: str
-
-
-class WebhookRequest(BaseModel):
-    provider_payment_id: str
-    status: str  # paid, refunded, failed
+    invoice_link: str  # открывается фронтом через Telegram.WebApp.openInvoice(link)
 
 
 class PaymentStatusResponse(BaseModel):
@@ -47,11 +41,10 @@ async def init_payment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Initialize a payment for a match."""
+    """Инициализировать оплату матча и выдать invoice-ссылку."""
     from app.services.payment_service import PaymentService
     from app.services.anti_fraud_service import AntiFraudService
 
-    # Anti-fraud check
     fraud_service = AntiFraudService(db)
     allow, reason = await fraud_service.check_before_payment(current_user.id)
     if not allow:
@@ -67,10 +60,24 @@ async def init_payment(
             user_id=current_user.id,
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if payment.status == "paid":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already paid")
+
+    # amount в минимальных единицах: для XTR — целое число звёзд как есть,
+    # для фиатных валют (USD/RUB) — умножить на 100 (центы/копейки)
+    amount_minor = (
+        int(payment.amount) if settings.CURRENCY == "XTR" else int(round(float(payment.amount) * 100))
+    )
+
+    invoice_link = await telegram_bot_service.create_invoice_link(
+        title="Открыть чат с владельцем вещи",
+        description="Разовая оплата за разблокировку чата по матчу",
+        payload=f"match:{req.match_id}:{current_user.id}",
+        amount_minor_units=amount_minor,
+        label="Разблокировка чата",
+    )
 
     return PaymentInitResponse(
         payment_id=payment.id,
@@ -78,30 +85,8 @@ async def init_payment(
         amount=float(payment.amount),
         currency=payment.currency,
         status=payment.status,
+        invoice_link=invoice_link,
     )
-
-
-@router.post("/webhook", response_model=dict)
-async def payment_webhook(
-    req: WebhookRequest,
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Process a payment webhook callback."""
-    from app.services.payment_service import PaymentService
-
-    payment_service = PaymentService(db)
-    payment = await payment_service.process_webhook(
-        provider_payment_id=req.provider_payment_id,
-        status=req.status,
-    )
-
-    if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment not found",
-        )
-
-    return {"status": "ok", "payment_status": payment.status}
 
 
 @router.get("/status/{match_id}", response_model=PaymentStatusResponse)
@@ -110,19 +95,24 @@ async def get_payment_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Get payment status for a match."""
     from app.services.payment_service import PaymentService
 
     payment_service = PaymentService(db)
     payment = await payment_service.get_payment_status(
-        match_id=match_id,
-        user_id=current_user.id,
+        match_id=match_id, user_id=current_user.id
     )
-
     if not payment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No payment found for this match and user",
         )
-
     return payment
+
+
+# ВНИМАНИЕ: POST /payment/webhook и POST /subscription/webhook — УДАЛЕНЫ.
+# Подтверждение оплаты теперь приходит ТОЛЬКО через защищённый
+# /telegram/webhook (см. api/telegram_webhook.py), т.к. это единственный
+# канал, для которого Telegram реально ставит проверяемую подпись
+# (X-Telegram-Bot-Api-Secret-Token). Публичный webhook с телом,
+# которое присылает сам клиент, невозможно защитить в принципе —
+# это доверие к данным от того, кто пытается подтвердить свой же платёж.
