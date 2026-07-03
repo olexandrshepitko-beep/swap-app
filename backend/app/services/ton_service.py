@@ -41,7 +41,7 @@ async def find_matching_transaction(
     if not settings.TON_WALLET_ADDRESS:
         raise TonVerificationError("TON_WALLET_ADDRESS is not configured")
 
-    params = {
+    params: dict[str, str | int] = {
         "address": settings.TON_WALLET_ADDRESS,
         "limit": lookback,
         "archival": "true",

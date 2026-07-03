@@ -73,16 +73,16 @@ async def _validate_payload_before_charge(
 
     if kind == "match":
         match_id, user_id = int(rest[0]), int(rest[1])
-        svc = PaymentService(db)
-        valid = await svc.can_accept_payment(match_id=match_id, user_id=user_id)
+        pay_svc = PaymentService(db)
+        valid = await pay_svc.can_accept_payment(match_id=match_id, user_id=user_id)
         if not valid:
             return False, "Матч не найден или оплата уже выполнена"
         return True, ""
 
     if kind == "sub":
         subscription_id, user_id = int(rest[0]), int(rest[1])
-        svc = SubscriptionService(db)
-        valid = await svc.can_accept_payment(subscription_id=subscription_id, user_id=user_id)
+        sub_svc = SubscriptionService(db)
+        valid = await sub_svc.can_accept_payment(subscription_id=subscription_id, user_id=user_id)
         if not valid:
             return False, "Подписка не найдена или уже активна"
         return True, ""
@@ -98,14 +98,14 @@ async def _settle_payment(
 
     if kind == "match":
         match_id, user_id = int(rest[0]), int(rest[1])
-        svc = PaymentService(db)
-        await svc.settle(match_id=match_id, user_id=user_id, provider_payment_id=charge_id)
+        pay_svc = PaymentService(db)
+        await pay_svc.settle(match_id=match_id, user_id=user_id, provider_payment_id=charge_id)
         return
 
     if kind == "sub":
         subscription_id, user_id = int(rest[0]), int(rest[1])
-        svc = SubscriptionService(db)
-        await svc.settle(
+        sub_svc = SubscriptionService(db)
+        await sub_svc.settle(
             subscription_id=subscription_id, user_id=user_id, provider_payment_id=charge_id
         )
         return

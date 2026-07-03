@@ -10,20 +10,23 @@
 Документация: https://core.telegram.org/bots/api#payments
 """
 
+from typing import Any
+
 import httpx
 
 from app.core.config import settings
-
-BOT_API_BASE = f"https://api.telegram.org/bot{settings.BOT_TOKEN}"
 
 
 class TelegramBotAPIError(RuntimeError):
     pass
 
 
-async def _call(method: str, payload: dict) -> dict:
+async def _call(method: str, payload: dict) -> Any:
+    token = settings.BOT_TOKEN
+    if not token:
+        raise TelegramBotAPIError("BOT_TOKEN not configured")
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(f"{BOT_API_BASE}/{method}", json=payload)
+        resp = await client.post(f"https://api.telegram.org/bot{token}/{method}", json=payload)
     data = resp.json()
     if not data.get("ok"):
         raise TelegramBotAPIError(

@@ -7,14 +7,14 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- Telegram ---
-    BOT_TOKEN: str  # без дефолта — падаем на старте, если не задан в env
+    BOT_TOKEN: Optional[str] = None  # без дефолта — падаем на старте, если не задан в env
     BOT_USERNAME: str = ""  # для deep link'ов (t.me/<username>), не путать с ID
 
     # Секрет, который Telegram будет присылать в заголовке
     # X-Telegram-Bot-Api-Secret-Token на каждый webhook-запрос.
     # Генерируется вами (например: python -c "import secrets;print(secrets.token_urlsafe(32))")
     # и передаётся В Telegram при вызове setWebhook(secret_token=...).
-    TELEGRAM_WEBHOOK_SECRET: str
+    TELEGRAM_WEBHOOK_SECRET: Optional[str] = None
 
     # Provider token из BotFather (/mybots -> Payments) для фиатных провайдеров
     # (ЮKassa, Stripe и т.п.). Если оплата идёт через Telegram Stars —
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # постоянный file_id (Telegram как бесплатный видео-CDN).
     # Бот должен быть добавлен туда админом. Получить chat_id: добавить
     # бота в канал, переслать любое сообщение из канала боту @getidsbot.
-    STORAGE_CHAT_ID: int
+    STORAGE_CHAT_ID: Optional[int] = None
 
     TON_API_KEY: str = ""
     # Публичный TON-адрес кошелька, куда пользователи шлют оплату напрямую
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     TON_MATCH_PRICE: float = 0.15   # цена разблокировки чата в TON
     TON_PRO_PRICE: float = 3.0      # цена PRO-подписки в TON
 
-    SECRET_KEY: str  # без дефолта — падаем на старте, если не задан в env
+    SECRET_KEY: Optional[str] = None  # без дефолта — падаем на старте, если не задан в env
 
     PRO_PRICE: float = 10.0
     MATCH_PRICE: float = 0.5
