@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Barter — обмен вещами</title>
+  <script>
+    // GitHub Pages SPA fallback — сохраняем запрошенный путь
+    // и перенаправляем на index.html
+    var path = location.pathname.replace(/^\/swap-app\//, '/');
+    var search = location.search;
+    var hash = location.hash || '#!' + path;
+    sessionStorage.redirect = path + search;
+    location.href = '/swap-app/';
+  </script>
+</head>
+<body>
+  <p>Перенаправление... <a href="/swap-app/">Barter</a></p>
+</body>
+</html>
