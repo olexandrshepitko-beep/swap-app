@@ -4,16 +4,14 @@
   <meta charset="utf-8">
   <title>Barter — обмен вещами</title>
   <script>
-    // GitHub Pages SPA fallback — сохраняем запрошенный путь
-    // и перенаправляем на index.html
-    var path = location.pathname.replace(/^\/swap-app\//, '/');
+    // GitHub Pages SPA fallback — редирект на HashRouter
+    // /swap-app/feed → /swap-app/#/feed
+    var path = location.pathname.replace(/^\/swap-app/, '') || '/';
     var search = location.search;
-    var hash = location.hash || '#!' + path;
-    sessionStorage.redirect = path + search;
-    location.href = '/swap-app/';
+    location.href = '/swap-app/#' + path + search;
   </script>
 </head>
 <body>
-  <p>Перенаправление... <a href="/swap-app/">Barter</a></p>
+  Перенаправление на <a href="/swap-app/">Barter</a>...
 </body>
 </html>
