@@ -5,7 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#0d0d1a" />
     <title>Barter — обмен вещами</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      // Telegram WebApp SDK — загружаем асинхронно, чтобы не блокировать рендер
+      var tgScript = document.createElement('script');
+      tgScript.src = 'https://telegram.org/js/telegram-web-app.js';
+      tgScript.async = true;
+      tgScript.onload = function() { document.dispatchEvent(new Event('tg-loaded')); };
+      tgScript.onerror = function() { 
+        console.warn('Telegram SDK not available — running in standalone mode');
+        document.dispatchEvent(new Event('tg-loaded'));
+      };
+      // Таймаут 3 секунды на загрузку Telegram SDK
+      setTimeout(function() { document.dispatchEvent(new Event('tg-loaded')); }, 3000);
+      document.head.appendChild(tgScript);
+    </script>
     <script type="module" crossorigin src="./assets/index-DxJgkzIg.js"></script>
   </head>
   <body>
