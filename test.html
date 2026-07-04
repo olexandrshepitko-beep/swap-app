@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Barter Test</title>
+  <style>
+    body { background: #0d0d1a; color: #e8e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; text-align: center; }
+    h1 { color: #667eea; }
+    .card { background: rgba(255,255,255,0.05); border-radius: 16px; padding: 24px; margin: 12px; max-width: 320px; width: 100%; }
+    .ok { color: #4ade80; }
+    .fail { color: #f87171; }
+    pre { font-size: 12px; text-align: left; overflow: auto; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Barter — Diagnostic</h1>
+  <div class="card" id="status">
+    <p id="tg-status">⏳ Checking Telegram...</p>
+    <p id="js-status">⏳ Checking JS...</p>
+    <p id="api-status">⏳ Checking API...</p>
+  </div>
+  <div class="card">
+    <pre id="details">Loading...</pre>
+  </div>
+
+  <script>
+    const details = [];
+    
+    // Check Telegram
+    try {
+      if (window.Telegram?.WebApp) {
+        const wa = window.Telegram.WebApp;
+        document.getElementById('tg-status').innerHTML = '✅ Telegram WebApp: OK';
+        details.push('Telegram WebApp: available');
+        details.push('initData: ' + (wa.initData ? 'present (' + wa.initData.length + ' chars)' : 'EMPTY'));
+        details.push('initDataUnsafe.user: ' + (wa.initDataUnsafe?.user?.id ? wa.initDataUnsafe.user.id : 'N/A'));
+        details.push('colorScheme: ' + wa.colorScheme);
+        details.push('isExpanded: ' + wa.isExpanded);
+        wa.ready();
+        wa.expand();
+      } else {
+        document.getElementById('tg-status').innerHTML = '⚠️ Telegram WebApp: NOT available (standalone browser)';
+        details.push('Telegram WebApp: not available');
+      }
+    } catch(e) {
+      document.getElementById('tg-status').innerHTML = '❌ Telegram WebApp: Error - ' + e.message;
+      details.push('Telegram WebApp error: ' + e.message);
+    }
+
+    // Check API
+    fetch('https://barter-app-production-5c66.up.railway.app/health')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('api-status').innerHTML = '✅ Backend API: ' + d.status;
+        details.push('API health: ' + JSON.stringify(d));
+        document.getElementById('details').textContent = details.join('\\n');
+      })
+      .catch(e => {
+        document.getElementById('api-status').innerHTML = '❌ Backend API: ' + e.message;
+        details.push('API error: ' + e.message);
+        document.getElementById('details').textContent = details.join('\\n');
+      });
+
+    // Check JS
+    document.getElementById('js-status').innerHTML = '✅ JavaScript engine: OK';
+    details.push('JS engine: OK');
+    details.push('Location: ' + window.location.href);
+    details.push('User-Agent: ' + navigator.userAgent.slice(0, 100));
+    setTimeout(() => {
+      document.getElementById('details').textContent = details.join('\\n');
+    }, 500);
+  </script>
+</body>
+</html>
